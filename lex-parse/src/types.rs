@@ -1,21 +1,25 @@
+#[derive(Debug, Clone, PartialEq)]
 pub struct SpecifierInfo {
-    marked_const: bool,
-    marked_volatile: bool,
-    marked_static: bool,
-    marked_int: bool,
-    marked_char: bool,
-    marked_void: bool
+    pub marked_const: bool,
+    pub marked_volatile: bool,
+    pub marked_static: bool,
+    pub marked_int: bool,
+    pub marked_char: bool,
+    pub marked_void: bool
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum DeclaratorPart {
     FunctionDecl(SpecifierInfo),
     PointerDecl(Option<SpecifierInfo>),
     ArrayDecl(i32),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct TypeInfo {
-    declarator: Vec<DeclaratorPart>,
-    type_specifier: SpecifierInfo,
+    pub declarator: Vec<DeclaratorPart>,
+    pub type_specifier: SpecifierInfo,
+    pub identifier: Option<String>,
 }
 
 

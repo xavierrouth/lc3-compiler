@@ -74,9 +74,8 @@ pub enum TokenKind {
 
     // Helper
     EOF
-
 }
-
+#[derive(Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub row: i32,
