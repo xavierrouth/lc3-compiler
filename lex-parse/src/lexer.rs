@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error;
 use std::fmt;
 
@@ -5,10 +6,13 @@ use crate::token::{Token, TokenKind};
 
 pub struct Lexer<'a> {
     index: usize,
+    line_idx: usize, // TODO: Combine line_idx and index
+    line_start: usize,
     row: i32,
     col: i32,
     input_stream: &'a str,
     putback: char,
+    lines: Vec<&'a str>
 }
 
 #[derive(Debug)]
@@ -35,11 +39,18 @@ impl<'a> Lexer<'a> {
     pub fn new(src: &str) -> Lexer<'_> {
         Lexer {
             index: 0,
+            line_idx: 0,
+            line_start: 0,
             row: 0,
             col: 0,
             input_stream: src,
             putback: EOF_CHAR,
+            lines: Vec::new()
         }
+    }
+
+    pub fn get_line(&self, line: usize ) -> Option<&'a str> {
+        self.lines.get(line).copied()
     }
 
     pub fn get_token(&mut self) -> Result<Token, ()> {
@@ -221,16 +232,21 @@ impl<'a> Lexer<'a> {
             ch
         }
         else {
-            let ch = match self.input_stream.chars().nth(0) {
+            let ch = match self.input_stream.chars().nth(self.row.try_into().unwrap()) {
                 Some(ch) => ch,
                 None => return EOF_CHAR // This is EOF 
             };
+            self.row += 1;
+
+            self.line_idx += ch.len_utf8();
+            self.index += ch.len_utf8();
 
             if ch == '\n' {
+                self.advance();
                 self.row = 0;
                 self.col += 1;
             }
-            self.advance_char(ch);
+
             ch
         }
     }
@@ -248,13 +264,10 @@ impl<'a> Lexer<'a> {
         ch
     } 
 
-    fn advance_char(&mut self, ch: char) -> () {
-        self.advance(ch.len_utf8());
-    }
-
-    fn advance(&mut self, bytes: usize) -> () {
-        self.index += bytes;
-        self.input_stream = &self.input_stream[bytes..]; // Advance input stream by num_bytes
+    fn advance(&mut self) -> () {
+        self.lines.push(&self.input_stream[0..self.line_idx]);
+        self.input_stream = &self.input_stream[self.line_idx..];
+        self.line_idx = 0;
     }
 
 

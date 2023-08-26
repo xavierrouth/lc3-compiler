@@ -1,9 +1,10 @@
 
 
+use std::fmt;
 use std::mem::Discriminant;
 
 use crate::types::{TypeInfo};
-use crate::token::{Token};
+use crate::token::{Token, TokenKind};
 
 // Need to maintain some maps, first is debug info, which maps ASTNodes to tokens.
 
@@ -50,7 +51,7 @@ pub enum ASTNode<'a> {
         identifier: Token,
         return_type: TypeInfo
     },
-    ParamaterDecl {
+    ParameterDecl {
         identifier: Token,
         r#type: TypeInfo
     },
@@ -130,6 +131,8 @@ pub trait Vistior<'a> {
     fn traverse(&mut self, node: &ASTNode<'a>) -> () {
         let order: TraversalOrder = self.get_order();
 
+        self.entry(node);
+
         if order == TraversalOrder::PreOrder {
             self.operate(node);
         }
@@ -184,7 +187,7 @@ pub trait Vistior<'a> {
             }
             // Terminal Nodes
             ASTNode::InlineAsm { assembly: _ } => {}
-            ASTNode::ParamaterDecl { identifier: _, r#type: _ } => {}
+            ASTNode::ParameterDecl { identifier: _, r#type: _ } => {}
             ASTNode::IntLiteral { value: _  } => {}
             ASTNode::SymbolRef { identifier: _} => {}
 
@@ -213,17 +216,24 @@ pub trait Vistior<'a> {
         if order == TraversalOrder::PostOrder {
             self.operate(node);
         }
+
+        self.exit(node);
     }
 
-    fn operate(&mut self, node: &ASTNode<'a>) -> () {
-        todo!() // Implementations should overload
-    }
+    // Implementations should overload:
+    fn operate(&mut self, node: &ASTNode<'a>) -> () {}
+
+    // Implementations shuold overload
+    fn entry(&mut self, node: &ASTNode<'a>) -> () {}
+
+    fn exit(&mut self, node: &ASTNode<'a>) -> () {}
 
     fn get_order(&self) -> TraversalOrder;
 
 
 }
 
+// AST Checker
 pub struct ASTCheck<'a> {
     pub results: Vec<Discriminant<ASTNode<'a>>>,
 }
@@ -241,5 +251,127 @@ impl <'a> Vistior<'a> for ASTCheck<'a> {
 
     fn operate(&mut self, node: &ASTNode<'a>) -> () {
         self.results.push(std::mem::discriminant(node));
+    }
+}
+
+// AST Printer
+
+pub struct ASTPrint {
+    pub debug_mode: bool,
+    pub depth: usize,
+}
+
+impl <'a> ASTPrint {
+    pub fn new(debug_mode: bool) -> ASTPrint {
+        ASTPrint { debug_mode , depth: 0}
+    }
+}
+
+impl <'a> Vistior<'a> for ASTPrint {
+    fn get_order(&self) -> TraversalOrder {
+        TraversalOrder::PreOrder
+    }
+
+    fn operate(&mut self, node: &ASTNode<'a>) -> () {
+        // TODO: Condition on debug mdoe vs pretty mode
+        let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
+        if (self.debug_mode) {
+            println!("{whitespace_string}{:?}", node)
+        }
+        else {
+            println!("{whitespace_string}{}", node)
+        }
+        
+    }
+
+    fn entry(&mut self, node: &ASTNode<'a>) -> () {
+        self.depth += 1;
+    }
+
+    fn exit(&mut self, node: &ASTNode<'a>) -> () {
+        self.depth -= 1;
+    }
+}
+
+
+impl fmt::Display for ASTNode<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ASTNode::BinaryOp { op, right, left } => {
+                write!(f, "<BinaryOp, op: {:?}>", op)
+            }
+            ASTNode::CompoundStmt { statements, new_scope } => {
+                write!(f, "<CompoundStmt>")
+            }
+            ASTNode::Program { declarations } => {
+                write!(f, "<Program>")
+            },
+            ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
+                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
+                    write!(f, "<FunctionDecl, {}>", str)
+                }
+                else {
+                    write!(f, "<FunctionDecl, missing name>")
+                }
+            },
+            // TODO: Find some way to pritn type info
+            ASTNode::ParameterDecl { identifier, r#type } => {
+                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
+                    write!(f, "<ParameterDecl, {}>", str)
+                }
+                else {
+                    write!(f, "<ParameterDecl, missing name>")
+                }
+            }
+            ASTNode::VariableDecl { identifier, initializer, r#type } => {
+                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
+                    write!(f, "<VariableDecl, {}>", str)
+                }
+                else {
+                    write!(f, "<VariableDecl, missing name>")
+                }
+            },
+            ASTNode::IntLiteral { value } => {
+                write!(f, "<IntLiteral, {}>", value)
+            },
+            ASTNode::FunctionCall { symbol_ref, arguments } => {
+                write!(f, "<FunctionCall>")
+            },
+            ASTNode::SymbolRef { identifier } => {
+                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
+                    write!(f, "<SymbolRef, {}>", str)
+                }
+                else {
+                    write!(f, "<SymbolRef, missing name>")
+                } 
+            },
+            ASTNode::UnaryOp { op, child, order } => {
+                write!(f, "<UnaryOp, op: {:?}, preorder: {:?}>", op, order)
+            },
+            ASTNode::Ternary { first, second, third } => {
+                write!(f, "<TernaryOp>")
+            },
+            ASTNode::ExpressionStmt { expression } => {
+                write!(f, "<ExpressionStmt>")
+            },
+            ASTNode::ReturnStmt { expression } => {
+                write!(f, "<ReturnStmt>")
+            },
+            ASTNode::ForStmt { initializer, condition, update, body } => {
+                write!(f, "<ForStmt>")
+            },
+            ASTNode::WhileStmt { condition, body } => {
+                write!(f, "<WhileStmt>")
+            },
+            ASTNode::IfStmt { condition, if_branch, else_branch } =>  {
+                write!(f, "<IfStmt>")
+            },
+            ASTNode::DeclStmt { declarations } =>  {
+                write!(f, "<DeclStmt>")
+            },
+            ASTNode::InlineAsm { assembly } => todo!(),
+            
+        }
+        
     }
 }

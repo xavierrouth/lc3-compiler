@@ -1,5 +1,6 @@
-use std::{path::PathBuf};
+use std::{path::PathBuf, fs::File, io::Read};
 use clap::Parser;
+use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}};
 
 
 #[derive(Parser, Debug)]
@@ -17,7 +18,7 @@ struct Cli {
     debug: bool,
 
     #[arg(value_name = "INPUT_FILE")]
-    input: Option<PathBuf>,
+    input: PathBuf,
 
 }
 
@@ -25,9 +26,23 @@ fn main() {
 
     let cli = Cli::parse();
 
-    let input: Option<&PathBuf> = cli.input.as_ref();
+    let input_path: PathBuf  = cli.input;
 
-    println!("{:?}", input);
+    let mut input_file = File::open(input_path).unwrap();
+
+    let mut input_stream = String::new();
+
+    input_file.read_to_string(&mut input_stream).unwrap();
+
+    let mut lexer: lexer::Lexer<'_> = lexer::Lexer::new(&input_stream);
+    let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer);
+
+    let ast_root: Result<Box<lex_parse::ast::ASTNode<'_>>, parser::ParserError> = parser.parse_translation_unit();
+
+    if cli.verbose {
+        let mut printer: ASTPrint = ASTPrint::new(false);
+        printer.traverse(&ast_root.unwrap());
+    }
 
     //println!("two: {:?}", cli.verbose);
 

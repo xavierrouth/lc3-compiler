@@ -9,17 +9,19 @@ use crate::types::SpecifierInfo;
 use crate::types::TypeInfo;
 
 #[derive(Debug)]
-pub enum ParserError {
+pub enum ParserError<'a> {
     FloatError(String),
+    GeneralError(String, Option<Token>, &'a str),
     UnknownError
 }
 
-impl error::Error for ParserError {}
+impl<'a> error::Error for ParserError<'a> {}
 
-impl fmt::Display for ParserError {
+impl<'a> fmt::Display for ParserError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParserError::FloatError(msg) => write!(f, "{}", msg),
+            ParserError::GeneralError(msg, invalid_token, line) => write!(f, "{}", msg),
             ParserError::UnknownError => write!(f, "Something went wrong"),
         }
     }
@@ -28,8 +30,8 @@ impl fmt::Display for ParserError {
 pub struct Parser<'a> {
     putback_stack: Vec<Token>, 
     lexer: &'a mut Lexer<'a>,
-    previous_token: Option<Token>, // Why do we need this again when we can just do putback?
-    errors: Vec<ParserError>,
+    previous_token: Option<Token>, // The last token that was returend
+    errors: Vec<ParserError<'a>>,
 }
 
 impl<'a> Parser<'a> {
@@ -62,7 +64,7 @@ impl<'a> Parser<'a> {
         t
     }
 
-    fn eat_token(& mut self, kind: TokenKind) -> Result<Token, ParserError> {
+    fn eat_token(& mut self, kind: TokenKind) -> Result<Token, ParserError<'a>> {
         let t = self.get_token();
         if kind != t.kind {
             //todo
@@ -85,7 +87,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_translation_unit(& mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    pub fn parse_translation_unit(& mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         let mut body: Vec<Box<ASTNode<'a>>> = Vec::new();
         
         while self.peek_token().kind != TokenKind::EOF {
@@ -96,7 +98,7 @@ impl<'a> Parser<'a> {
         Ok(Box::new(ASTNode::Program { declarations: (body) }))
     }
     
-    fn parse_toplevel_decl(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_toplevel_decl(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
 
         let mut ti = self.parse_declaration_specifiers()?;
 
@@ -107,7 +109,7 @@ impl<'a> Parser<'a> {
         }
 
         if self.expect_token(TokenKind::OpenParen) {
-            self.parse_function_definition(&mut ti)
+            self.parse_function_definition(ti, tok.unwrap())
         }
         else {
             self.parse_declaration(&mut ti, tok.unwrap())
@@ -115,7 +117,7 @@ impl<'a> Parser<'a> {
     }
 
     //TODO: Error handling here
-    fn parse_declaration_specifiers(&mut self) -> Result<TypeInfo, ParserError> {
+    fn parse_declaration_specifiers(&mut self) -> Result<TypeInfo, ParserError<'a>> {
         let mut ti = TypeInfo{ declarator: Vec::new(), type_specifier: SpecifierInfo::default()};
         while self.parse_declaration_specifier(& mut ti) {
             continue;
@@ -145,11 +147,44 @@ impl<'a> Parser<'a> {
         None // This is an error..., shjould return Result<Token>
     }
 
-    fn parse_function_definition(&mut self, _ti: &mut TypeInfo) -> Result<Box<ASTNode<'a>>, ParserError> {
-        todo!()
+    fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: Token) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {    
+        self.eat_token(TokenKind::OpenParen)?;
+
+        let mut parameters: Vec<Box<ASTNode<'a>>> = Vec::new();
+
+        while !self.expect_token(TokenKind::CloseParen) {
+            let mut param_type: TypeInfo = self.parse_declaration_specifiers()?;
+
+            // TODO: Check if there was actually a declaration specifier
+            if let Some(param_identifier) = self.parse_declarator(& mut param_type, true) {
+                // else ERROR
+                parameters.push(Box::new(ASTNode::ParameterDecl { identifier: param_identifier, r#type: param_type }));
+                if !self.expect_token(TokenKind::Comma) {
+                    break;
+                }
+                else {
+                    self.eat_token(TokenKind::Comma)?;
+                }
+            }
+            else {
+                return Err(ParserError::GeneralError("Expected declarator.".to_string(), Some(identifier), ))
+            }
+        }
+
+        self.eat_token(TokenKind::CloseParen)?;
+
+        // Check for semicolon here
+        if self.expect_token(TokenKind::OpenBrace) {
+            let body: Box<ASTNode<'a>> = self.parse_compound_statement()?;
+            Ok(Box::new(ASTNode::FunctionDecl { body, parameters, identifier, return_type }))
+        }
+        else {
+            return Err(ParserError::GeneralError("Functions without bodies are not supported yet.".to_string(), Some(identifier)))
+        }
+
     }
 
-    fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: Token) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: Token) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
 
         if self.expect_token(TokenKind::Equals) {
             self.eat_token(TokenKind::Equals)?;
@@ -168,7 +203,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_compound_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_compound_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         self.eat_token(TokenKind::OpenBrace)?;
         let mut statements: Vec<Box<ASTNode<'a>>> = Vec::new();
 
@@ -181,7 +216,7 @@ impl<'a> Parser<'a> {
         Ok(Box::new(ASTNode::CompoundStmt { statements: statements, new_scope: true }))
     }
 
-    fn parse_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         // Accept errors here?
         match self.peek_token().kind {
             // These eat semicolons for you!
@@ -198,7 +233,7 @@ impl<'a> Parser<'a> {
                     self.parse_declaration(&mut ti, id) // JK this does eat semicolon
                 }
                 else {
-                    let stmt: Result<Box<ASTNode<'a>>, ParserError> = self.parse_expression(0);
+                    let stmt: Result<Box<ASTNode<'a>>, ParserError<'a>> = self.parse_expression(0);
                     self.eat_token(TokenKind::Semicolon)?;
                     stmt
                 }
@@ -206,28 +241,28 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_return_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_return_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         self.eat_token(TokenKind::Return)?;
         let expression: Box<ASTNode<'a>> = self.parse_expression(0)?;
-        let stmt: Result<Box<ASTNode<'a>>, ParserError> = Ok(Box::new(ASTNode::ReturnStmt { expression }));
+        let stmt: Result<Box<ASTNode<'a>>, ParserError<'a>> = Ok(Box::new(ASTNode::ReturnStmt { expression }));
         self.eat_token(TokenKind::Semicolon)?;
         stmt
     }
 
-    fn parse_if_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_if_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         todo!()
     }
 
-    fn parse_while_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_while_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         todo!()
     }
 
-    fn parse_for_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_for_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         todo!()
     }
 
     // Pratt Parsing
-    fn parse_expression(&mut self, binding_power: u8) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_expression(&mut self, binding_power: u8) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         let mut lhs: Box<ASTNode<'a>> = match self.peek_token().kind {
             TokenKind::IntLiteral(..) => self.parse_int_literal()?,
             TokenKind::Identifier(..) => self.parse_symbol_ref()?,
@@ -326,7 +361,7 @@ impl<'a> Parser<'a> {
     }
 
 
-    fn prefix_binding_power(&self, op: TokenKind) -> Result<((), u8), ParserError> {
+    fn prefix_binding_power(&self, op: TokenKind) -> Result<((), u8), ParserError<'a>> {
         match op {
             TokenKind::Plus => Ok(((), 28)),
             TokenKind::Minus => Ok(((), 28)),
@@ -348,7 +383,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn infix_binding_power(&self, op: TokenKind) -> Result<(u8, u8), ParserError> {
+    fn infix_binding_power(&self, op: TokenKind) -> Result<(u8, u8), ParserError<'a>> {
         match op {
             TokenKind::Dot => Ok((28, 29)),
             TokenKind::Arrow => Ok((28, 29)),
@@ -380,7 +415,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_int_literal(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_int_literal(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         let value: i32 = match self.get_token().kind {
             TokenKind::IntLiteral(value) => value,
             _ => {return Err(ParserError::UnknownError);}
@@ -388,7 +423,7 @@ impl<'a> Parser<'a> {
         Ok(Box::new(ASTNode::IntLiteral { value }))
     }
 
-    fn parse_symbol_ref(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_symbol_ref(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
 
         let identifier = self.get_token();
 
@@ -401,25 +436,25 @@ impl<'a> Parser<'a> {
         
     }
 
-    fn parse_function_call(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_function_call(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
         todo!()
     }
     
 }
 
-
-mod lexer_tests {
+#[cfg(test)]
+mod parser_tests {
 
     use std::mem::{Discriminant, discriminant};
 
-    use crate::ast::{Vistior, ASTCheck};
+    use crate::ast::{Vistior, ASTCheck, ASTPrint};
     use crate::lexer::{Lexer};
     use crate::parser::{self, Parser};
     use super::*;
     use crate::token::{TokenKind};
 
     #[test]
-    fn basic() {
+    fn var_decl() {
         let src = String::from("int a;");
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         let mut parser: Parser<'_> = Parser::new(& mut lexer);
@@ -440,16 +475,35 @@ mod lexer_tests {
             assert_eq!(checker.results[i], gold[i])
         }
 
+        let mut printer: ASTPrint = ASTPrint::new(false);
+
+        printer.traverse(&node);
+
     }
 
     #[test]
-    fn symbol() {
-        let src = String::from("test hi ethan");
+    fn expression() {
+        let src = String::from("5 - 10 + (3 * 11)");
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("test".to_string()));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("hi".to_string()));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("ethan".to_string()));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
+        let mut parser: Parser<'_> = Parser::new(& mut lexer);
+
+        let node: Box<ASTNode<'_>> = parser.parse_expression(0).unwrap();
+
+        let mut checker: ASTCheck<'_> = ASTCheck::new(); 
+
+        checker.traverse(&node);
+
+        /*
+        let gold: Vec<Discriminant<ASTNode<'_>>> = vec![
+            discriminant(&ASTNode::BinaryOp {left: Box::new(ASTNode:: {})}),
+            discriminant(&ASTNode::VariableDecl() { identifier: Token::default(), initializer: None, r#type: TypeInfo::default() }),
+        ];
+
+        for i in 0..checker.results.len() {
+            dbg!(checker.results[i]);
+            assert_eq!(checker.results[i], gold[i])
+        }
+        */
     }
 
     #[test]
