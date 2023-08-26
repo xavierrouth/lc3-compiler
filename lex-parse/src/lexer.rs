@@ -20,7 +20,7 @@ pub enum LexerError {
 impl error::Error for LexerError {}
 
 impl fmt::Display for LexerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LexerError::FloatError(msg) => write!(f, "{}", msg),
             LexerError::UnknownError => write!(f, "Something went wrong"),
@@ -32,7 +32,7 @@ pub(crate) const EOF_CHAR: char = '\0';
 
 impl<'a> Lexer<'a> {
 
-    pub fn new(src: &str) -> Lexer {
+    pub fn new(src: &str) -> Lexer<'_> {
         Lexer {
             index: 0,
             row: 0,
@@ -259,7 +259,7 @@ mod lexer_tests {
     #[test]
     fn basic() {
         let src = String::from("+ = -");
-        let mut lexer: Lexer = Lexer::new(src.as_str());
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Plus);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Equals);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Minus);
@@ -269,7 +269,7 @@ mod lexer_tests {
     #[test]
     fn symbol() {
         let src = String::from("test hi ethan");
-        let mut lexer: Lexer = Lexer::new(src.as_str());
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(String::from("test")));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(String::from("hi")));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(String::from("ethan")));

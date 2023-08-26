@@ -30,7 +30,7 @@ pub enum UnaryOpType {
     Address,
     Dereference,
 }
-
+#[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode<'a> {
     // ==== Declarations: ====
     Program { 

@@ -1,6 +1,7 @@
 use std::{io, path::PathBuf};
 use clap::Parser;
 
+
 #[derive(Parser, Debug)]
 #[command(name = "LC3-Compiler")]
 #[command(about = "A C to LC3 Compiler built for students at the University of Illinois Urbana-Champaign by HKN (https://hkn-alpha.netlify.app).", long_about = None)]

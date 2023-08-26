@@ -58,7 +58,8 @@ pub enum TokenKind {
     SlashSlash,
     SlashStar,
 
-    Const,
+    // ====== Keywords ======
+    Const, 
     Volatile,
     Extern,
     Static,
@@ -71,6 +72,10 @@ pub enum TokenKind {
     Double,
 
     Return,
+    If,
+    For,
+    While,
+    
 
     // Helper
     EOF

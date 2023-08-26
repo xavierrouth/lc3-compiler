@@ -16,10 +16,10 @@ pub enum DeclaratorPart {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TypeInfo {
+pub struct TypeInfo<'a> {
     pub declarator: Vec<DeclaratorPart>,
     pub type_specifier: SpecifierInfo,
-    pub identifier: Option<String>,
+    pub identifier: Option<&'a str>,
 }
 
 
