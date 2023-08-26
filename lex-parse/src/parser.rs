@@ -89,7 +89,7 @@ impl<'a> Parser<'a> {
     
     fn parse_toplevel_decl(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
         let t = self.peek_token();
-        let mut ti: TypeInfo = self.parse_declaration_specifiers().unwrap();
+        let mut ti: TypeInfo<'a> = self.parse_declaration_specifiers().unwrap();
 
         self.parse_declarator(&mut ti);
 
@@ -119,7 +119,7 @@ impl<'a> Parser<'a> {
         todo!()
     }
 
-    fn parse_declaration(&mut self, ti: &mut TypeInfo) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_declaration(&mut self, ti: &mut TypeInfo<'a>) -> Result<Box<ASTNode<'a>>, ParserError> {
 
         if self.expect_token(TokenKind::Equals) {
             self.eat_token(TokenKind::Equals)?;
@@ -129,12 +129,12 @@ impl<'a> Parser<'a> {
             self.eat_token(TokenKind::Semicolon)?;
 
             Ok(Box::new(ASTNode::VariableDecl 
-                { identifier: ti.identifier, initializer: Some(initializer), r#type: ti.clone() })
+                { identifier: ti.identifier.unwrap(), initializer: Some(initializer), r#type: ti.clone() })
             )
         }
         else {
-            self.eat_token(TokenKind::Semicolon)?;
-            Ok(Box::new(ASTNode::VariableDecl { identifier: ti.identifier.unwrap().as_str(), initializer: None, r#type: ti.clone() }))
+            self.eat_token(TokenKind::Semicolon)?; 
+            Ok(Box::new(ASTNode::VariableDecl { identifier: ti.identifier.unwrap(), initializer: None, r#type: ti.clone() }))
         }
     }
 

@@ -40,16 +40,16 @@ pub enum ASTNode<'a> {
         body: Box<ASTNode<'a>>,
         parameters: Vec<Box<ASTNode<'a>>>,
         identifier: &'a str,
-        return_type: TypeInfo
+        return_type: TypeInfo<'a>
     },
     ParamaterDecl {
         identifier: &'a str,
-        r#type: TypeInfo
+        r#type: TypeInfo<'a>
     },
     VariableDecl {
         identifier: &'a str,
         initializer: Option<Box<ASTNode<'a>>>,
-        r#type: TypeInfo
+        r#type: TypeInfo<'a>
     },
     // ==== Expressions: ====
     IntLiteral {
@@ -61,7 +61,7 @@ pub enum ASTNode<'a> {
     },
     SymbolRef {
         identifier: &'a str,
-        r#type: TypeInfo,
+        r#type: TypeInfo<'a>,
     },
     BinaryOp {
         op: BinaryOpType,
@@ -119,7 +119,7 @@ pub enum TraversalOrder {
 }
 
 pub trait Vistior {
-    fn traverse(&mut self, node: &ASTNode) -> () {
+    fn traverse(&mut self, node: &ASTNode<'_>) -> () {
         let order: TraversalOrder = self.get_order();
 
         if order == TraversalOrder::PreOrder {
@@ -188,7 +188,7 @@ pub trait Vistior {
         }
     }
 
-    fn operate(&mut self, node: &ASTNode) -> () {
+    fn operate(&mut self, node: &ASTNode<'_>) -> () {
         todo!() // Implementations should overload
     }
 
