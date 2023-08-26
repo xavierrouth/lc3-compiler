@@ -153,7 +153,16 @@ impl<'a> Lexer<'a> {
                 Ok(TokenKind::IntLiteral(self.number(ch).unwrap_or(0)))
             }
             _ if ch.is_ascii_alphanumeric() || ch == '_' => {
-                Ok(TokenKind::Identifier(self.symbol(ch).unwrap_or(String::from("oops!"))))
+                let string = self.symbol(ch).unwrap();
+                match string.as_str() {
+                    "auto" => Ok(TokenKind::Auto),
+                    "break" => Ok(TokenKind::Break),
+                    "int" => Ok(TokenKind::Int),
+                    "return" => Ok(TokenKind::Return),
+                    // TODO:
+                    _  => Ok(TokenKind::Identifier(string))
+                }
+                
             }
             _ => {
                 Err(LexerError::UnknownError)
@@ -191,6 +200,7 @@ impl<'a> Lexer<'a> {
             str.push(ch);
             ch = self.next();
         }
+        self.putback(ch);
         Ok(str)
     }
 
@@ -247,6 +257,7 @@ impl<'a> Lexer<'a> {
         self.input_stream = &self.input_stream[bytes..]; // Advance input stream by num_bytes
     }
 
+
 }
 
 
@@ -293,6 +304,16 @@ mod lexer_tests {
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
+    }
+
+    #[test]
+    fn decl() {
+        let src = String::from("int a;");
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Int);
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("a".to_string()));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Semicolon);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
     }
     

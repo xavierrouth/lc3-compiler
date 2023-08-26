@@ -5,6 +5,7 @@ use crate::ast::{ASTNode, UnaryOpType, BinaryOpType};
 use crate::lexer::{Lexer};
 use crate::token::{Token, TokenKind};
 
+use crate::types::SpecifierInfo;
 use crate::types::TypeInfo;
 
 #[derive(Debug)]
@@ -27,11 +28,21 @@ impl fmt::Display for ParserError {
 pub struct Parser<'a> {
     putback_stack: Vec<Token>, 
     lexer: &'a mut Lexer<'a>,
-    previous_token: Token, // Why do we need this again when we can just do putback?
+    previous_token: Option<Token>, // Why do we need this again when we can just do putback?
     errors: Vec<ParserError>,
 }
 
 impl<'a> Parser<'a> {
+    pub fn new(lexer: &'a mut Lexer<'a>) -> Parser<'a> {
+        Parser {
+            putback_stack: Vec::new(),
+            lexer: lexer,
+            previous_token: None,
+            errors: Vec::new()
+        }
+    }
+    
+
     fn get_token(&mut self) -> Token {
         if !self.putback_stack.is_empty() {
             self.putback_stack.pop().unwrap()
@@ -74,7 +85,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_translation_unit(& mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
+    pub fn parse_translation_unit(& mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
         let mut body: Vec<Box<ASTNode<'a>>> = Vec::new();
         
         while self.peek_token().kind != TokenKind::EOF {
@@ -89,7 +100,7 @@ impl<'a> Parser<'a> {
 
         let mut ti = self.parse_declaration_specifiers()?;
 
-        let tok: Option<Token> = self.parse_declarator(&mut ti);
+        let tok: Option<Token> = self.parse_declarator(&mut ti, true);
         
         if tok.is_none() {
             return Err(ParserError::UnknownError);
@@ -103,14 +114,35 @@ impl<'a> Parser<'a> {
         }
     }
 
+    //TODO: Error handling here
     fn parse_declaration_specifiers(&mut self) -> Result<TypeInfo, ParserError> {
-        Err(ParserError::UnknownError)
+        let mut ti = TypeInfo{ declarator: Vec::new(), type_specifier: SpecifierInfo::default()};
+        while self.parse_declaration_specifier(& mut ti) {
+            continue;
+        }
+        Ok(ti)
+    }
+
+    fn parse_declaration_specifier(&mut self, type_info: &mut TypeInfo) -> bool {
+        match self.peek_token().kind {
+            TokenKind::Int => type_info.type_specifier.marked_int = true,
+            TokenKind::Void => type_info.type_specifier.marked_void = true,
+            TokenKind::Char => type_info.type_specifier.marked_char = true,
+            TokenKind::Static => type_info.type_specifier.marked_static = true,
+            TokenKind::Const => type_info.type_specifier.marked_const = true,
+            _ => {return false;}
+        }
+        self.get_token();
+        true
     }
 
     // Adds a declarator to a TypeInfo
     // Add the token name to this thing
-    fn parse_declarator(&mut self, _ti: &mut TypeInfo) -> Option<Token> {
-        todo!()
+    fn parse_declarator(&mut self, ti: &mut TypeInfo, check_pointer: bool) -> Option<Token> {
+        if self.expect_token(TokenKind::Identifier("test".to_string())) {
+            return Some(self.get_token());
+        }
+        None // This is an error..., shjould return Result<Token>
     }
 
     fn parse_function_definition(&mut self, _ti: &mut TypeInfo) -> Result<Box<ASTNode<'a>>, ParserError> {
@@ -162,7 +194,7 @@ impl<'a> Parser<'a> {
                 let mut ti: TypeInfo = self.parse_declaration_specifiers()?;
                 if ti.type_specifier.marked_int || ti.type_specifier.marked_char {
                     // TODO: Error maybe
-                    let id: Token = self.parse_declarator(&mut ti).unwrap();
+                    let id: Token = self.parse_declarator(&mut ti, true).unwrap();
                     self.parse_declaration(&mut ti, id) // JK this does eat semicolon
                 }
                 else {
@@ -371,6 +403,73 @@ impl<'a> Parser<'a> {
 
     fn parse_function_call(&mut self) -> Result<Box<ASTNode<'a>>, ParserError> {
         todo!()
+    }
+    
+}
+
+
+mod lexer_tests {
+
+    use std::mem::{Discriminant, discriminant};
+
+    use crate::ast::{Vistior, ASTCheck};
+    use crate::lexer::{Lexer};
+    use crate::parser::{self, Parser};
+    use super::*;
+    use crate::token::{TokenKind};
+
+    #[test]
+    fn basic() {
+        let src = String::from("int a;");
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+        let mut parser: Parser<'_> = Parser::new(& mut lexer);
+
+        let node: Box<ASTNode<'_>> = parser.parse_translation_unit().unwrap();
+
+        let mut checker: ASTCheck<'_> = ASTCheck::new(); 
+
+        checker.traverse(&node);
+
+        let gold: Vec<Discriminant<ASTNode<'_>>> = vec![
+            discriminant(&ASTNode::Program { declarations: Vec::new()}),
+            discriminant(&ASTNode::VariableDecl { identifier: Token::default(), initializer: None, r#type: TypeInfo::default() }),
+        ];
+
+        for i in 0..checker.results.len() {
+            dbg!(checker.results[i]);
+            assert_eq!(checker.results[i], gold[i])
+        }
+
+    }
+
+    #[test]
+    fn symbol() {
+        let src = String::from("test hi ethan");
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("test".to_string()));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("hi".to_string()));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("ethan".to_string()));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
+    }
+
+    #[test]
+    fn integer() {
+        let src = String::from("3043 423423 120");
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
+    }
+
+    #[test]
+    fn float() {
+        let src = String::from("3043.434 423423.543 120.654");
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
     }
     
 }

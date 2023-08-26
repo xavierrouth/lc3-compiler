@@ -79,6 +79,13 @@ pub enum TokenKind {
     If,
     For,
     While,
+    Break,
+
+    Int,
+    Void,
+    Char,
+
+    
 
     // Helper
     EOF
@@ -89,4 +96,15 @@ pub struct Token {
     pub row: i32,
     pub col: i32,
     pub length: usize, // Unused
+}
+
+impl Default for Token {
+    fn default() -> Self {
+        Token {
+            kind: TokenKind::EOF,
+            row: 0,
+            col: 0,
+            length: 0,
+        }
+    }
 }

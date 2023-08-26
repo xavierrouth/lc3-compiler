@@ -1,5 +1,7 @@
 
 
+use std::mem::Discriminant;
+
 use crate::types::{TypeInfo};
 use crate::token::{Token};
 
@@ -124,8 +126,8 @@ pub enum TraversalOrder {
     PreOrder
 }
 
-pub trait Vistior {
-    fn traverse<'a>(&mut self, node: &ASTNode<'a>) -> () {
+pub trait Vistior<'a> {
+    fn traverse(&mut self, node: &ASTNode<'a>) -> () {
         let order: TraversalOrder = self.get_order();
 
         if order == TraversalOrder::PreOrder {
@@ -213,11 +215,31 @@ pub trait Vistior {
         }
     }
 
-    fn operate(&mut self, _node: &ASTNode<'_>) -> () {
+    fn operate(&mut self, node: &ASTNode<'a>) -> () {
         todo!() // Implementations should overload
     }
 
     fn get_order(&self) -> TraversalOrder;
 
 
+}
+
+pub struct ASTCheck<'a> {
+    pub results: Vec<Discriminant<ASTNode<'a>>>,
+}
+
+impl<'a> ASTCheck<'a>{
+    pub fn new() -> ASTCheck<'a> {
+        ASTCheck { results: Vec::new() }
+    }
+}
+
+impl <'a> Vistior<'a> for ASTCheck<'a> {
+    fn get_order(&self) -> TraversalOrder {
+        TraversalOrder::PreOrder
+    }
+
+    fn operate(&mut self, node: &ASTNode<'a>) -> () {
+        self.results.push(std::mem::discriminant(node));
+    }
 }
