@@ -1,6 +1,7 @@
-use std::ops::Deref;
+
 
 use crate::types::{TypeInfo};
+use crate::token::{Token};
 
 // Need to maintain some maps, first is debug info, which maps ASTNodes to tokens.
 
@@ -33,6 +34,8 @@ pub enum UnaryOpType {
     BinNot,
     FunctionCall
 }
+
+// Todo: Split into different lifetimes, one for nodes one for token references.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode<'a> {
     // ==== Declarations: ====
@@ -42,17 +45,17 @@ pub enum ASTNode<'a> {
     FunctionDecl {
         body: Box<ASTNode<'a>>,
         parameters: Vec<Box<ASTNode<'a>>>,
-        identifier: &'a str,
-        return_type: TypeInfo<'a>
+        identifier: Token,
+        return_type: TypeInfo
     },
     ParamaterDecl {
-        identifier: &'a str,
-        r#type: TypeInfo<'a>
+        identifier: Token,
+        r#type: TypeInfo
     },
     VariableDecl {
-        identifier: &'a str,
+        identifier: Token,
         initializer: Option<Box<ASTNode<'a>>>,
-        r#type: TypeInfo<'a>
+        r#type: TypeInfo
     },
     // ==== Expressions: ====
     IntLiteral {
@@ -63,7 +66,7 @@ pub enum ASTNode<'a> {
         arguments: Vec<Box<ASTNode<'a>>>,
     },
     SymbolRef {
-        identifier: &'a str,
+        identifier: Token,
         //r#type: TypeInfo<'a>,
     },
     BinaryOp {

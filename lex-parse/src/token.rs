@@ -1,5 +1,7 @@
 use std::marker::PhantomData;
 
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Equals,
@@ -81,7 +83,7 @@ pub enum TokenKind {
     // Helper
     EOF
 }
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub row: i32,

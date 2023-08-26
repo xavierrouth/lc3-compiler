@@ -42,7 +42,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn get_token(&mut self) -> Result<Token<'a>, ()> {
+    pub fn get_token(&mut self) -> Result<Token, ()> {
        
         let mut ch: char = self.skip_until();
         
@@ -52,7 +52,7 @@ impl<'a> Lexer<'a> {
         let col = self.col;
         // There must be a better way to do this.
         // Match Tokens:
-        let kind: Result<TokenKind<'a>, LexerError> = match ch  {
+        let kind: Result<TokenKind, LexerError> = match ch  {
             '!' => {ch = self.next(); 
                 match ch {
                 '=' => Ok(TokenKind::ExclamationEquals),
@@ -163,7 +163,7 @@ impl<'a> Lexer<'a> {
 
         let length: usize = self.index - start_index;
 
-        let token: Token<'a> = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length};
+        let token: Token = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length};
 
         Ok(token)
     }
