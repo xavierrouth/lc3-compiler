@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Equals,
@@ -75,7 +77,6 @@ pub enum TokenKind {
     If,
     For,
     While,
-    
 
     // Helper
     EOF

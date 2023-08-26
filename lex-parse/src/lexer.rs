@@ -42,7 +42,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn get_token(&mut self) -> Result<Token, ()> {
+    pub fn get_token(&mut self) -> Result<Token<'a>, ()> {
        
         let mut ch: char = self.skip_until();
         
@@ -52,7 +52,7 @@ impl<'a> Lexer<'a> {
         let col = self.col;
         // There must be a better way to do this.
         // Match Tokens:
-        let kind: Result<TokenKind, LexerError> = match ch  {
+        let kind: Result<TokenKind<'a>, LexerError> = match ch  {
             '!' => {ch = self.next(); 
                 match ch {
                 '=' => Ok(TokenKind::ExclamationEquals),
@@ -163,13 +163,13 @@ impl<'a> Lexer<'a> {
 
         let length: usize = self.index - start_index;
 
-        let token: Token = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length};
+        let token: Token<'a> = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length};
 
         Ok(token)
     }
 
     fn number(&mut self, mut ch: char) -> Result<i32, ()> {
-        let mut float_error: bool = false;
+        let _float_error: bool = false;
         let mut val: i32 = ch as i32 - '0' as i32;
 
         ch = self.next();
@@ -253,8 +253,8 @@ impl<'a> Lexer<'a> {
 #[cfg(test)]
 mod lexer_tests {
 
-    use crate::lexer::{Lexer, LexerError};
-    use crate::token::{Token, TokenKind};
+    use crate::lexer::{Lexer};
+    use crate::token::{TokenKind};
 
     #[test]
     fn basic() {
@@ -270,16 +270,16 @@ mod lexer_tests {
     fn symbol() {
         let src = String::from("test hi ethan");
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(String::from("test")));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(String::from("hi")));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(String::from("ethan")));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("test".to_string()));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("hi".to_string()));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("ethan".to_string()));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
     }
 
     #[test]
     fn integer() {
         let src = String::from("3043 423423 120");
-        let mut lexer: Lexer = Lexer::new(src.as_str());
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
@@ -289,7 +289,7 @@ mod lexer_tests {
     #[test]
     fn float() {
         let src = String::from("3043.434 423423.543 120.654");
-        let mut lexer: Lexer = Lexer::new(src.as_str());
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));

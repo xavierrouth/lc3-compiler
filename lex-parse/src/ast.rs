@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::types::{TypeInfo, DeclaratorPart, SpecifierInfo};
+use crate::types::{TypeInfo};
 
 // Need to maintain some maps, first is debug info, which maps ASTNodes to tokens.
 
@@ -13,7 +13,6 @@ pub enum BinaryOpType {
     Mod,
     LogAnd,
     LogOr,
-    LogNot,
     BitAnd,
     LessThan,
     GreaterThan,
@@ -29,6 +28,10 @@ pub enum UnaryOpType {
     Decrement,
     Address,
     Dereference,
+    Negate,
+    LogNot,
+    BinNot,
+    FunctionCall
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode<'a> {
@@ -61,7 +64,7 @@ pub enum ASTNode<'a> {
     },
     SymbolRef {
         identifier: &'a str,
-        r#type: TypeInfo<'a>,
+        //r#type: TypeInfo<'a>,
     },
     BinaryOp {
         op: BinaryOpType,
@@ -119,7 +122,7 @@ pub enum TraversalOrder {
 }
 
 pub trait Vistior {
-    fn traverse(&mut self, node: &ASTNode<'_>) -> () {
+    fn traverse<'a>(&mut self, node: &ASTNode<'a>) -> () {
         let order: TraversalOrder = self.get_order();
 
         if order == TraversalOrder::PreOrder {
@@ -148,7 +151,7 @@ pub trait Vistior {
             }
             ASTNode::VariableDecl { identifier, initializer, r#type } => {
                 if initializer.is_some() {
-                    self.traverse(initializer.unwrap().deref()); // Why doesn't this explicitly deref??
+                    self.traverse(initializer.as_ref().unwrap().as_ref()); // Why doesn't this explicitly deref??
                 }
             }
             ASTNode::ReturnStmt { expression } => {
@@ -178,7 +181,26 @@ pub trait Vistior {
             ASTNode::InlineAsm { assembly: _ } => {}
             ASTNode::ParamaterDecl { identifier: _, r#type: _ } => {}
             ASTNode::IntLiteral { value: _  } => {}
-            ASTNode::SymbolRef { identifier: _, r#type: _ } => {}
+            ASTNode::SymbolRef { identifier: _} => {}
+
+            ASTNode::Program { declarations } => {
+                for decl in declarations.iter() {
+                    self.traverse(decl);
+                }
+            },
+            ASTNode::Ternary { first, second, third } => {
+                self.traverse(first);
+                self.traverse(second);
+                self.traverse(third);
+            }
+            ASTNode::ExpressionStmt { expression } => {
+                self.traverse(expression);
+            },
+            ASTNode::DeclStmt { declarations } => {
+                for decl in declarations.iter() {
+                    self.traverse(decl);
+                }
+            },
             //_ => todo!()
 
         }
@@ -188,7 +210,7 @@ pub trait Vistior {
         }
     }
 
-    fn operate(&mut self, node: &ASTNode<'_>) -> () {
+    fn operate(&mut self, _node: &ASTNode<'_>) -> () {
         todo!() // Implementations should overload
     }
 
