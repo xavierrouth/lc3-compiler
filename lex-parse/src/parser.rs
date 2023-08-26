@@ -109,11 +109,11 @@ impl<'a> Parser<'a> {
 
     // Adds a declarator to a TypeInfo
     // Add the token name to this thing
-    fn parse_declarator(&mut self, mut ti: &mut TypeInfo) -> Option<Token> {
+    fn parse_declarator(&mut self, _ti: &mut TypeInfo) -> Option<Token> {
         todo!()
     }
 
-    fn parse_function_definition(&mut self, mut ti: &mut TypeInfo) -> Result<Box<ASTNode<'a>>, ParserError> {
+    fn parse_function_definition(&mut self, _ti: &mut TypeInfo) -> Result<Box<ASTNode<'a>>, ParserError> {
         todo!()
     }
 

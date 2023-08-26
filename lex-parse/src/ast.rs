@@ -133,11 +133,11 @@ pub trait Vistior {
         }
 
         match node {
-            ASTNode::BinaryOp { op, right, left } => {
+            ASTNode::BinaryOp { op: _, right, left } => {
                 self.traverse(left);
                 self.traverse(right);
             }
-            ASTNode::UnaryOp { op, child, order } => {
+            ASTNode::UnaryOp { op: _, child, order: _ } => {
                 self.traverse(child);
             }
             ASTNode::FunctionCall { symbol_ref, arguments } => {
@@ -146,13 +146,13 @@ pub trait Vistior {
                     self.traverse(arg);
                 }
             }
-            ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
+            ASTNode::FunctionDecl { body, parameters, identifier: _, return_type: _ } => {
                 for param in parameters.iter() {
                     self.traverse(param);
                 }
                 self.traverse(body);
             }
-            ASTNode::VariableDecl { identifier, initializer, r#type } => {
+            ASTNode::VariableDecl { identifier: _, initializer, r#type: _ } => {
                 if initializer.is_some() {
                     self.traverse(initializer.as_ref().unwrap().as_ref()); // Why doesn't this explicitly deref??
                 }
@@ -160,7 +160,7 @@ pub trait Vistior {
             ASTNode::ReturnStmt { expression } => {
                 self.traverse(expression);
             }
-            ASTNode::CompoundStmt { statements, new_scope } => {
+            ASTNode::CompoundStmt { statements, new_scope: _ } => {
                 for stmt in statements.iter() {
                     self.traverse(stmt);
                 }
