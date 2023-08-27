@@ -93,8 +93,8 @@ pub enum TokenKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub row: i32,
-    pub col: i32,
+    pub row: usize,
+    pub col: usize,
     pub length: usize, // Unused
 }
 

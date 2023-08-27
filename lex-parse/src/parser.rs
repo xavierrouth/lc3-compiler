@@ -1,7 +1,8 @@
 use std::error;
 use std::fmt;
 
-use crate::ast::{ASTNode, UnaryOpType, BinaryOpType};
+use colored::Colorize;
+use crate::ast::{AST, ASTNodeHandle, ASTNode, UnaryOpType, BinaryOpType};
 use crate::lexer::{Lexer};
 use crate::token::{Token, TokenKind};
 
@@ -11,7 +12,8 @@ use crate::types::TypeInfo;
 #[derive(Debug)]
 pub enum ParserError<'a> {
     FloatError(String),
-    GeneralError(String, Option<Token>, &'a str),
+    GeneralError(String, Option<(Token, &'a str)>),
+    MissingToken(String, Option<(Token, &'a str)>),
     UnknownError
 }
 
@@ -21,7 +23,24 @@ impl<'a> fmt::Display for ParserError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParserError::FloatError(msg) => write!(f, "{}", msg),
-            ParserError::GeneralError(msg, invalid_token, line) => write!(f, "{}", msg),
+            ParserError::GeneralError(msg, dbg_info) => {
+                if let Some((token, line)) = dbg_info {
+                    let whitespace_string: String = std::iter::repeat(' ').take(token.col + 8).collect(); // 8 is length of 'line 2 | 
+                    write!(f, "{} {}\n line {} | {}{whitespace_string} {}", "error:".red(), msg, token.row + 1, line, "^".green())
+                }
+                else {
+                    write!(f, "{}", msg)
+                }
+            },
+            ParserError::MissingToken(msg, dbg_info) => {
+                if let Some((token, line)) = dbg_info {
+                    let whitespace_string: String = std::iter::repeat(' ').take(token.col + 9).collect(); // 8 is length of 'line 2 | 
+                    write!(f, "{} {}\n line {} | {}{whitespace_string} {}", "error:".red(), msg, token.row + 1, line, "^".green())
+                }
+                else {
+                    write!(f, "{}", msg)
+                }
+            },
             ParserError::UnknownError => write!(f, "Something went wrong"),
         }
     }
@@ -30,8 +49,9 @@ impl<'a> fmt::Display for ParserError<'a> {
 pub struct Parser<'a> {
     putback_stack: Vec<Token>, 
     lexer: &'a mut Lexer<'a>,
-    previous_token: Option<Token>, // The last token that was returend
+    token: Token, // The last token that was returend
     errors: Vec<ParserError<'a>>,
+    pub ast: AST<'a>,
 }
 
 impl<'a> Parser<'a> {
@@ -39,19 +59,30 @@ impl<'a> Parser<'a> {
         Parser {
             putback_stack: Vec::new(),
             lexer: lexer,
-            previous_token: None,
-            errors: Vec::new()
+            token: Token::default(),
+            errors: Vec::new(),
+            ast: AST::new(),
         }
     }
     
+    /*
+    pub fn get_ast(&mut self) -> &'a AST<'a> {
+        &self.ast
+    } */
 
     fn get_token(&mut self) -> Token {
         if !self.putback_stack.is_empty() {
-            self.putback_stack.pop().unwrap()
+            self.token = self.putback_stack.pop().unwrap()
         }
         else {
-            self.lexer.get_token().unwrap()
+            self.token = self.lexer.get_token().unwrap()
+            
         }
+        self.token.clone()
+    }
+
+    fn prev_token(& self) -> Token {
+        return self.token.clone()
     }
 
     fn putback_token(& mut self, t: Token) -> () {
@@ -59,17 +90,27 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_token(& mut self) -> Token {
+        let save_token = self.token.clone();
         let t = self.get_token();
         self.putback_token(t.clone());
+        self.token = save_token;
         t
     }
 
     fn eat_token(& mut self, kind: TokenKind) -> Result<Token, ParserError<'a>> {
+        let prev = self.prev_token(); // Need to not update prev token on peek
         let t = self.get_token();
         if kind != t.kind {
             //todo
             match kind {
-                _ => Err(ParserError::UnknownError)
+                TokenKind::Semicolon => {
+                    let token = self.prev_token();
+                    return Err(ParserError::MissingToken("Expected semicolon.".to_string(), Some((prev.clone(), self.lexer.get_line(prev.row).unwrap_or("Uh Oh")))))
+                }
+                _ => {
+                    let token = self.prev_token();
+                    return Err(ParserError::GeneralError("Unexpected token.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
+                }
             }
         }
         else {
@@ -87,25 +128,27 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_translation_unit(& mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
-        let mut body: Vec<Box<ASTNode<'a>>> = Vec::new();
+    pub fn parse_translation_unit(& mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+        let mut body: Vec<ASTNodeHandle> = Vec::new();
         
         while self.peek_token().kind != TokenKind::EOF {
-            let node: Box<ASTNode<'a>> = self.parse_toplevel_decl()?;
-            body.push(node);
+            let decl: ASTNodeHandle = self.parse_toplevel_decl()?;
+            body.push(decl);
         }
 
-        Ok(Box::new(ASTNode::Program { declarations: (body) }))
+        let node = ASTNode::Program { declarations: (body) };
+        Ok(self.ast.nodes.insert(node))
     }
     
-    fn parse_toplevel_decl(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_toplevel_decl(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
 
         let mut ti = self.parse_declaration_specifiers()?;
 
         let tok: Option<Token> = self.parse_declarator(&mut ti, true);
         
         if tok.is_none() {
-            return Err(ParserError::UnknownError);
+            let token = self.prev_token();
+            return Err(ParserError::GeneralError("Expected declarator.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
         }
 
         if self.expect_token(TokenKind::OpenParen) {
@@ -147,10 +190,10 @@ impl<'a> Parser<'a> {
         None // This is an error..., shjould return Result<Token>
     }
 
-    fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: Token) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {    
+    fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: Token) -> Result<ASTNodeHandle, ParserError<'a>> {    
         self.eat_token(TokenKind::OpenParen)?;
 
-        let mut parameters: Vec<Box<ASTNode<'a>>> = Vec::new();
+        let mut parameters: Vec<ASTNodeHandle> = Vec::new();
 
         while !self.expect_token(TokenKind::CloseParen) {
             let mut param_type: TypeInfo = self.parse_declaration_specifiers()?;
@@ -158,7 +201,9 @@ impl<'a> Parser<'a> {
             // TODO: Check if there was actually a declaration specifier
             if let Some(param_identifier) = self.parse_declarator(& mut param_type, true) {
                 // else ERROR
-                parameters.push(Box::new(ASTNode::ParameterDecl { identifier: param_identifier, r#type: param_type }));
+                let param = ASTNode::ParameterDecl { identifier: param_identifier, r#type: param_type };
+                let handle = self.ast.nodes.insert(param);
+                parameters.push(handle);
                 if !self.expect_token(TokenKind::Comma) {
                     break;
                 }
@@ -167,56 +212,63 @@ impl<'a> Parser<'a> {
                 }
             }
             else {
-                return Err(ParserError::GeneralError("Expected declarator.".to_string(), Some(identifier), ))
-            }
+                let token = self.prev_token();
+                return Err(ParserError::GeneralError("Expected a name for this variable.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))            }
         }
 
         self.eat_token(TokenKind::CloseParen)?;
 
         // Check for semicolon here
         if self.expect_token(TokenKind::OpenBrace) {
-            let body: Box<ASTNode<'a>> = self.parse_compound_statement()?;
-            Ok(Box::new(ASTNode::FunctionDecl { body, parameters, identifier, return_type }))
+            let body: ASTNodeHandle = self.parse_compound_statement()?;
+
+            let node = ASTNode::FunctionDecl { body, parameters, identifier, return_type };
+            Ok(self.ast.nodes.insert(node))
         }
         else {
-            return Err(ParserError::GeneralError("Functions without bodies are not supported yet.".to_string(), Some(identifier)))
+            let token = self.prev_token();
+            return Err(ParserError::GeneralError("Functions without bodies are not supported yet.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
         }
 
     }
 
-    fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: Token) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: Token) -> Result<ASTNodeHandle, ParserError<'a>> {
 
         if self.expect_token(TokenKind::Equals) {
             self.eat_token(TokenKind::Equals)?;
             // Variable Declaration
-            let initializer: Box<ASTNode<'a>> = self.parse_expression(0)?;
+            let initializer: ASTNodeHandle = self.parse_expression(0)?;
 
             self.eat_token(TokenKind::Semicolon)?;
 
-            Ok(Box::new(ASTNode::VariableDecl 
-                { identifier: identifier, initializer: Some(initializer), r#type: ti.clone() })
-            )
+            let node = ASTNode::VariableDecl { identifier: identifier, initializer: Some(initializer), r#type: ti.clone() };
+            Ok(self.ast.nodes.insert(node))
         }
         else {
             self.eat_token(TokenKind::Semicolon)?; 
-            Ok(Box::new(ASTNode::VariableDecl { identifier, initializer: None, r#type: ti.clone() }))
+
+            let node = ASTNode::VariableDecl { identifier, initializer: None, r#type: ti.clone() };
+            Ok(self.ast.nodes.insert(node))
         }
     }
 
-    fn parse_compound_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_compound_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         self.eat_token(TokenKind::OpenBrace)?;
-        let mut statements: Vec<Box<ASTNode<'a>>> = Vec::new();
+        let mut statements: Vec<ASTNodeHandle> = Vec::new();
 
         while !self.expect_token(TokenKind::EOF) && !self.expect_token(TokenKind::CloseBrace) {
-            let node: Box<ASTNode<'a>> = self.parse_statement()?; // Automatically pass error up
+            let node: ASTNodeHandle = self.parse_statement()?; // Automatically pass error up
             statements.push(node);
         }
 
         self.eat_token(TokenKind::CloseBrace)?;
-        Ok(Box::new(ASTNode::CompoundStmt { statements: statements, new_scope: true }))
+
+        let node = ASTNode::CompoundStmt { statements: statements, new_scope: true };
+        Ok(self.ast.nodes.insert(node))
+
     }
 
-    fn parse_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         // Accept errors here?
         match self.peek_token().kind {
             // These eat semicolons for you!
@@ -233,7 +285,7 @@ impl<'a> Parser<'a> {
                     self.parse_declaration(&mut ti, id) // JK this does eat semicolon
                 }
                 else {
-                    let stmt: Result<Box<ASTNode<'a>>, ParserError<'a>> = self.parse_expression(0);
+                    let stmt: Result<ASTNodeHandle, ParserError<'a>> = self.parse_expression(0);
                     self.eat_token(TokenKind::Semicolon)?;
                     stmt
                 }
@@ -241,58 +293,68 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_return_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_return_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         self.eat_token(TokenKind::Return)?;
-        let expression: Box<ASTNode<'a>> = self.parse_expression(0)?;
-        let stmt: Result<Box<ASTNode<'a>>, ParserError<'a>> = Ok(Box::new(ASTNode::ReturnStmt { expression }));
+        let expression: ASTNodeHandle = self.parse_expression(0)?;
+
+        let stmt = ASTNode::ReturnStmt { expression };
+        let stmt = self.ast.nodes.insert(stmt);
         self.eat_token(TokenKind::Semicolon)?;
-        stmt
+        Ok(stmt)
     }
 
-    fn parse_if_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_if_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         todo!()
     }
 
-    fn parse_while_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_while_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         todo!()
     }
 
-    fn parse_for_statement(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_for_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         todo!()
     }
 
     // Pratt Parsing
-    fn parse_expression(&mut self, binding_power: u8) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
-        let mut lhs: Box<ASTNode<'a>> = match self.peek_token().kind {
+    fn parse_expression(&mut self, binding_power: u8) -> Result<ASTNodeHandle, ParserError<'a>> {
+        let mut lhs: ASTNodeHandle = match self.peek_token().kind {
             TokenKind::IntLiteral(..) => self.parse_int_literal()?,
             TokenKind::Identifier(..) => self.parse_symbol_ref()?,
             TokenKind::OpenParen => {
                 self.eat_token(TokenKind::OpenParen)?;
-                let temp: Box<ASTNode<'a>> = self.parse_expression(0)?;
+                let temp: ASTNodeHandle = self.parse_expression(0)?;
                 self.eat_token(TokenKind::CloseParen)?;
                 temp
             }
 
-            tok @ _ => {
+            token_kind @ _ => {
                 // Check if this is a prefix op
-                let ((), r_bp) = self.prefix_binding_power(tok.clone())?;
-                let child: Box<ASTNode<'a>> = self.parse_expression(r_bp)?;
+                if let Some(((), r_bp) )= self.prefix_binding_power(&token_kind) {
+                    let child: ASTNodeHandle = self.parse_expression(r_bp)?;
 
-                // Transform tok to op
-                let op: UnaryOpType = match tok {
-                    TokenKind::Star => UnaryOpType::Dereference, 
-                    TokenKind::PlusPlus => UnaryOpType::Increment, 
-                    TokenKind::And => UnaryOpType::Address, 
-                    TokenKind::MinusMinus => UnaryOpType::Decrement, 
-                    TokenKind::Minus => UnaryOpType::Negate, 
-                    TokenKind::Exclamation => UnaryOpType::LogNot,
-                    TokenKind::Tilde => UnaryOpType::BinNot,
-                    _ => {return Err(ParserError::UnknownError)}
-                };
-                Box::new(ASTNode::UnaryOp {op, child, order: true })
+                    // Transform tok to op
+                    let op: UnaryOpType = match token_kind {
+                        TokenKind::Star => UnaryOpType::Dereference, 
+                        TokenKind::PlusPlus => UnaryOpType::Increment, 
+                        TokenKind::And => UnaryOpType::Address, 
+                        TokenKind::MinusMinus => UnaryOpType::Decrement, 
+                        TokenKind::Minus => UnaryOpType::Negate, 
+                        TokenKind::Exclamation => UnaryOpType::LogNot,
+                        TokenKind::Tilde => UnaryOpType::BinNot,
+                        _ => {return Err(ParserError::UnknownError)}
+                    };
+                    self.eat_token(token_kind)?;
+                    let node = ASTNode::UnaryOp {op, child, order: true };
+                    self.ast.nodes.insert(node)
+                }
+                else {
+                    let token = self.prev_token();
+                    return Err(ParserError::GeneralError("Expected expression.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
+                }
             }
         };
 
+        // Infix and postfix expressoins:
         loop {
             if self.expect_token(TokenKind::Semicolon) || self.expect_token(TokenKind::CloseParen) {
                 break;
@@ -304,56 +366,64 @@ impl<'a> Parser<'a> {
             
             // Need to make token copy, not move. This is annyoing!
 
-            // If its postfix op
+            
             let token = self.peek_token();
-            if let Some((l_bp, ())) = self.postfix_binding_power(token.kind.clone()) {
+
+            // Postfix Operator
+            if let Some((l_bp, ())) = self.postfix_binding_power(&token.kind) {
                 if l_bp < binding_power {
                     break;
                 }
 
-                self.eat_token(token.kind.clone())?;
-                
                 if token.kind == TokenKind::OpenParen {
                     lhs = self.parse_function_call()?;
                 }
                 // Handle function calls somewhere
                 else {
+                    //self.get_token(); // What is this for?
                     let op: UnaryOpType = match token.kind {
 
                         TokenKind::PlusPlus => UnaryOpType::Increment, 
                         TokenKind::MinusMinus => UnaryOpType::Decrement, 
                         _ => {return Err(ParserError::UnknownError)}
                     };
-                    lhs = Box::new(ASTNode::UnaryOp {op, child: lhs, order: false });
+                    let node = ASTNode::UnaryOp {op, child: lhs, order: false };
+                    lhs = self.ast.nodes.insert(node);
+                    
                 }
-
                 continue;
             }
 
-            let (l_bp, r_bp) = self.infix_binding_power(token.kind.clone())?;
+            // Infix Operator
+            if let Some((l_bp, r_bp)) = self.infix_binding_power(&token.kind) {
+                if l_bp < binding_power {
+                    break;
+                }
 
-            if l_bp < binding_power {
-                break;
+                self.get_token();
+
+                // TODO: Test for ternay '?' then ':'
+
+                let rhs = self.parse_expression(r_bp)?;
+
+                let op: BinaryOpType = match token.kind {
+                    TokenKind::Plus => BinaryOpType::Add, 
+                    TokenKind::Minus => BinaryOpType::Sub,
+                    TokenKind::Star => BinaryOpType::Mul,  
+                    TokenKind::Slash => BinaryOpType::Div,
+                    TokenKind::Percent => BinaryOpType::Mod, 
+                    TokenKind::AndAnd => BinaryOpType::LogAnd,
+                    TokenKind::BarBar => BinaryOpType::LogOr,
+                    _ => {return Err(ParserError::UnknownError)}
+                };
+
+                let node = ASTNode::BinaryOp { op, right: rhs, left: lhs };
+                lhs = self.ast.nodes.insert(node);
+                continue;
+
             }
-
-            self.get_token();
-
-            // TODO: Test for ternay '?' then ':'
-
-            let rhs = self.parse_expression(r_bp)?;
-
-            let op: BinaryOpType = match token.kind {
-                TokenKind::Plus => BinaryOpType::Add, 
-                TokenKind::Minus => BinaryOpType::Sub,
-                TokenKind::Star => BinaryOpType::Mul,  
-                TokenKind::Slash => BinaryOpType::Div,
-                TokenKind::Percent => BinaryOpType::Mod, 
-                TokenKind::AndAnd => BinaryOpType::LogAnd,
-                TokenKind::BarBar => BinaryOpType::LogOr,
-                _ => {return Err(ParserError::UnknownError)}
-            };
-
-            lhs = Box::new(ASTNode::BinaryOp { op, right: rhs, left: lhs });
+            break; // Shoudln't get here
+            
         };
 
         Ok(lhs)
@@ -361,19 +431,19 @@ impl<'a> Parser<'a> {
     }
 
 
-    fn prefix_binding_power(&self, op: TokenKind) -> Result<((), u8), ParserError<'a>> {
+    fn prefix_binding_power(&self, op: &TokenKind) -> Option<((), u8)> {
         match op {
-            TokenKind::Plus => Ok(((), 28)),
-            TokenKind::Minus => Ok(((), 28)),
-            TokenKind::And => Ok(((), 28)),
-            TokenKind::Star => Ok(((), 28)),
-            TokenKind::PlusPlus => Ok(((), 28)),
-            TokenKind::MinusMinus => Ok(((), 28)),
-            _ => Err(ParserError::UnknownError)
+            TokenKind::Plus => Some(((), 28)),
+            TokenKind::Minus => Some(((), 28)),
+            TokenKind::And => Some(((), 28)),
+            TokenKind::Star => Some(((), 28)),
+            TokenKind::PlusPlus => Some(((), 28)),
+            TokenKind::MinusMinus => Some(((), 28)),
+            _ => None
         }
     }
 
-    fn postfix_binding_power(&self, op: TokenKind) -> Option<(u8, ())> {
+    fn postfix_binding_power(&self, op: &TokenKind) -> Option<(u8, ())> {
         match op {
             TokenKind::OpenParen => Some((30, ())),
             TokenKind::OpenBracket => Some((30, ())),
@@ -383,60 +453,65 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn infix_binding_power(&self, op: TokenKind) -> Result<(u8, u8), ParserError<'a>> {
+    fn infix_binding_power(&self, op: &TokenKind) -> Option<(u8, u8)> {
         match op {
-            TokenKind::Dot => Ok((28, 29)),
-            TokenKind::Arrow => Ok((28, 29)),
+            TokenKind::Dot => Some((28, 29)),
+            TokenKind::Arrow => Some((28, 29)),
 
-            TokenKind::Star => Ok((26, 27)),
-            TokenKind::Slash => Ok((26, 27)),
-            TokenKind::Percent => Ok((26, 27)),
+            TokenKind::Star => Some((26, 27)),
+            TokenKind::Slash => Some((26, 27)),
+            TokenKind::Percent => Some((26, 27)),
 
-            TokenKind::Plus => Ok((24, 25)),
-            TokenKind::Minus => Ok((24, 25)),
+            TokenKind::Plus => Some((24, 25)),
+            TokenKind::Minus => Some((24, 25)),
 
-            TokenKind::LeftShift => Ok((22, 23)),
-            TokenKind::RightShift => Ok((22, 23)),
+            TokenKind::LeftShift => Some((22, 23)),
+            TokenKind::RightShift => Some((22, 23)),
 
-            TokenKind::GreaterThan => Ok((14, 15)),
-            TokenKind::GreaterThanEqual => Ok((14, 15)),
-            TokenKind::LessThan => Ok((14, 15)),
-            TokenKind::LessThanEqual => Ok((14, 15)),
+            TokenKind::GreaterThan => Some((14, 15)),
+            TokenKind::GreaterThanEqual => Some((14, 15)),
+            TokenKind::LessThan => Some((14, 15)),
+            TokenKind::LessThanEqual => Some((14, 15)),
 
-            TokenKind::EqualsEquals => Ok((12, 13)),
-            TokenKind::ExclamationEquals => Ok((12, 13)),
+            TokenKind::EqualsEquals => Some((12, 13)),
+            TokenKind::ExclamationEquals => Some((12, 13)),
 
-            TokenKind::And => Ok((10, 11)),
-            TokenKind::Bar => Ok((8, 9)),
+            TokenKind::And => Some((10, 11)),
+            TokenKind::Bar => Some((8, 9)),
 
-            TokenKind::Equals => Ok((5, 4)),
+            TokenKind::Equals => Some((5, 4)),
 
-            _ => Err(ParserError::UnknownError)
+            _ => None
         }
     }
 
-    fn parse_int_literal(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_int_literal(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         let value: i32 = match self.get_token().kind {
             TokenKind::IntLiteral(value) => value,
             _ => {return Err(ParserError::UnknownError);}
         };
-        Ok(Box::new(ASTNode::IntLiteral { value }))
+        let node = ASTNode::IntLiteral { value };
+        Ok(self.ast.nodes.insert(node))
+
     }
 
-    fn parse_symbol_ref(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_symbol_ref(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
 
         let identifier = self.get_token();
 
         if std::mem::discriminant(&identifier.kind) == std::mem::discriminant(&TokenKind::Identifier("test".to_string())) {
-            Ok(Box::new(ASTNode::SymbolRef {identifier}))
+            let node = ASTNode::SymbolRef {identifier};
+            Ok(self.ast.nodes.insert(node))
+
         }
         else {
-            Err(ParserError::UnknownError)
+            let token = self.prev_token();
+            return Err(ParserError::GeneralError("Expected symbol.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
         }
         
     }
 
-    fn parse_function_call(&mut self) -> Result<Box<ASTNode<'a>>, ParserError<'a>> {
+    fn parse_function_call(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
         todo!()
     }
     
@@ -459,12 +534,14 @@ mod parser_tests {
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         let mut parser: Parser<'_> = Parser::new(& mut lexer);
 
-        let node: Box<ASTNode<'_>> = parser.parse_translation_unit().unwrap();
+        let root = parser.parse_translation_unit().unwrap();
+        let ast: &AST<'_> = &parser.ast;
 
-        let mut checker: ASTCheck<'_> = ASTCheck::new(); 
+        let mut checker: ASTCheck<'_> = ASTCheck::new(ast); 
 
-        checker.traverse(&node);
+        checker.traverse(&root);
 
+        
         let gold: Vec<Discriminant<ASTNode<'_>>> = vec![
             discriminant(&ASTNode::Program { declarations: Vec::new()}),
             discriminant(&ASTNode::VariableDecl { identifier: Token::default(), initializer: None, r#type: TypeInfo::default() }),
@@ -474,10 +551,10 @@ mod parser_tests {
             dbg!(checker.results[i]);
             assert_eq!(checker.results[i], gold[i])
         }
+         
+        let mut printer: ASTPrint<'_> = ASTPrint::new(false, ast);
 
-        let mut printer: ASTPrint = ASTPrint::new(false);
-
-        printer.traverse(&node);
+        printer.traverse(&root);
 
     }
 
@@ -487,11 +564,12 @@ mod parser_tests {
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         let mut parser: Parser<'_> = Parser::new(& mut lexer);
 
-        let node: Box<ASTNode<'_>> = parser.parse_expression(0).unwrap();
+        let root = parser.parse_expression(0);
+        let ast: &AST<'_> = &parser.ast;
 
-        let mut checker: ASTCheck<'_> = ASTCheck::new(); 
+        let mut checker: ASTCheck<'_> = ASTCheck::new(ast); 
 
-        checker.traverse(&node);
+        checker.traverse(&root.unwrap());
 
         /*
         let gold: Vec<Discriminant<ASTNode<'_>>> = vec![

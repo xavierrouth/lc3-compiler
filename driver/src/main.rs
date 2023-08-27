@@ -2,7 +2,6 @@ use std::{path::PathBuf, fs::File, io::Read};
 use clap::Parser;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}};
 
-
 #[derive(Parser, Debug)]
 #[command(name = "LC3-Compiler")]
 #[command(about = "A C to LC3 Compiler built for students at the University of Illinois Urbana-Champaign by HKN (https://hkn-alpha.netlify.app).", long_about = None)]
@@ -37,11 +36,16 @@ fn main() {
     let mut lexer: lexer::Lexer<'_> = lexer::Lexer::new(&input_stream);
     let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer);
 
-    let ast_root: Result<Box<lex_parse::ast::ASTNode<'_>>, parser::ParserError> = parser.parse_translation_unit();
+    let root = parser.parse_translation_unit();
+    // Check errors here
+    if let Err(error) = root {
+        println!("{}", error);
+        return;
+    }
 
     if cli.verbose {
-        let mut printer: ASTPrint = ASTPrint::new(false);
-        printer.traverse(&ast_root.unwrap());
+        let mut printer: ASTPrint = ASTPrint::new(false, &parser.ast);
+        printer.traverse(&root.unwrap());
     }
 
     //println!("two: {:?}", cli.verbose);

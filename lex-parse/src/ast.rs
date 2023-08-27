@@ -1,5 +1,5 @@
 
-
+use slotmap::{SlotMap, SecondaryMap};
 use std::fmt;
 use std::mem::Discriminant;
 
@@ -38,16 +38,31 @@ pub enum UnaryOpType {
     FunctionCall
 }
 
+
+slotmap::new_key_type! { pub struct ASTNodeHandle; }
+
+// SlotMap is just an arena allocator
+pub struct AST<'a> {
+    pub nodes: SlotMap<ASTNodeHandle, ASTNode<'a>>,
+    pub root: Option<ASTNodeHandle>,
+}
+
+impl <'a> AST<'a> {
+    pub fn new() -> AST<'a> {
+        AST { nodes: SlotMap::with_key(), root: None}
+    }
+}
+
 // Todo: Split into different lifetimes, one for nodes one for token references.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode<'a> {
     // ==== Declarations: ====
     Program { 
-        declarations: Vec<Box<ASTNode<'a>>>,
+        declarations: Vec<ASTNodeHandle>,
     },
     FunctionDecl {
-        body: Box<ASTNode<'a>>,
-        parameters: Vec<Box<ASTNode<'a>>>,
+        body: ASTNodeHandle,
+        parameters: Vec<ASTNodeHandle>,
         identifier: Token,
         return_type: TypeInfo
     },
@@ -57,7 +72,7 @@ pub enum ASTNode<'a> {
     },
     VariableDecl {
         identifier: Token,
-        initializer: Option<Box<ASTNode<'a>>>,
+        initializer: Option<ASTNodeHandle>,
         r#type: TypeInfo
     },
     // ==== Expressions: ====
@@ -65,8 +80,8 @@ pub enum ASTNode<'a> {
         value: i32,
     },
     FunctionCall {
-        symbol_ref: Box<ASTNode<'a>>,
-        arguments: Vec<Box<ASTNode<'a>>>,
+        symbol_ref: ASTNodeHandle,
+        arguments: Vec<ASTNodeHandle>,
     },
     SymbolRef {
         identifier: Token,
@@ -74,47 +89,47 @@ pub enum ASTNode<'a> {
     },
     BinaryOp {
         op: BinaryOpType,
-        right: Box<ASTNode<'a>>,
-        left: Box<ASTNode<'a>>,
+        right: ASTNodeHandle,
+        left: ASTNodeHandle,
     },
     UnaryOp {
         op: UnaryOpType,
-        child: Box<ASTNode<'a>>,
+        child: ASTNodeHandle,
         order: bool, // Wish this could be an anonymouis enum with, PREPORDEr or POSTORDEr
     },
     Ternary {
-        first: Box<ASTNode<'a>>,
-        second: Box<ASTNode<'a>>,
-        third: Box<ASTNode<'a>>,
+        first: ASTNodeHandle,
+        second: ASTNodeHandle,
+        third: ASTNodeHandle,
     },
     // ==== Statements: ====
     CompoundStmt {
-        statements: Vec<Box<ASTNode<'a>>>,
+        statements: Vec<ASTNodeHandle>,
         new_scope: bool,
     },
     ExpressionStmt {
-        expression: Box<ASTNode<'a>>,
+        expression: ASTNodeHandle,
     },
     ReturnStmt {
-        expression: Box<ASTNode<'a>>,
+        expression: ASTNodeHandle,
     },
     ForStmt {
-        initializer: Box<ASTNode<'a>>,
-        condition: Box<ASTNode<'a>>,
-        update: Box<ASTNode<'a>>,
-        body: Box<ASTNode<'a>>,
+        initializer: ASTNodeHandle,
+        condition: ASTNodeHandle,
+        update: ASTNodeHandle,
+        body: ASTNodeHandle,
     },
     WhileStmt {
-        condition: Box<ASTNode<'a>>,
-        body: Box<ASTNode<'a>>,
+        condition: ASTNodeHandle,
+        body: ASTNodeHandle,
     },
     IfStmt {
-        condition: Box<ASTNode<'a>>,
-        if_branch: Box<ASTNode<'a>>,
-        else_branch: Box<ASTNode<'a>>,
+        condition: ASTNodeHandle,
+        if_branch: ASTNodeHandle,
+        else_branch: ASTNodeHandle,
     },
     DeclStmt {
-        declarations: Vec<Box<ASTNode<'a>>>,
+        declarations: Vec<ASTNodeHandle>,
     },
     InlineAsm {
         assembly: &'a str,
@@ -128,8 +143,10 @@ pub enum TraversalOrder {
 }
 
 pub trait Vistior<'a> {
-    fn traverse(&mut self, node: &ASTNode<'a>) -> () {
+    fn traverse(&mut self, node_h: &ASTNodeHandle) -> () {
         let order: TraversalOrder = self.get_order();
+
+        let node: &ASTNode<'_> = &self.get_node(*node_h);
 
         self.entry(node);
 
@@ -159,7 +176,7 @@ pub trait Vistior<'a> {
             }
             ASTNode::VariableDecl { identifier: _, initializer, r#type: _ } => {
                 if initializer.is_some() {
-                    self.traverse(initializer.as_ref().unwrap().as_ref()); // Why doesn't this explicitly deref??
+                    self.traverse(initializer.as_ref().unwrap()); // Why doesn't this explicitly deref??
                 }
             }
             ASTNode::ReturnStmt { expression } => {
@@ -230,17 +247,19 @@ pub trait Vistior<'a> {
 
     fn get_order(&self) -> TraversalOrder;
 
+    fn get_node(&self, node_h: ASTNodeHandle) -> ASTNode<'a>;
 
 }
 
 // AST Checker
 pub struct ASTCheck<'a> {
     pub results: Vec<Discriminant<ASTNode<'a>>>,
+    ast: &'a AST<'a>,
 }
 
 impl<'a> ASTCheck<'a>{
-    pub fn new() -> ASTCheck<'a> {
-        ASTCheck { results: Vec::new() }
+    pub fn new(ast: &'a AST<'a>) -> ASTCheck<'a> {
+        ASTCheck { results: Vec::new(), ast}
     }
 }
 
@@ -252,22 +271,27 @@ impl <'a> Vistior<'a> for ASTCheck<'a> {
     fn operate(&mut self, node: &ASTNode<'a>) -> () {
         self.results.push(std::mem::discriminant(node));
     }
+
+    fn get_node(&self, node_h: ASTNodeHandle) -> ASTNode<'a> {
+        self.ast.nodes.get(node_h).unwrap().clone()
+    }
 }
 
 // AST Printer
 
-pub struct ASTPrint {
+pub struct ASTPrint<'a> {
     pub debug_mode: bool,
     pub depth: usize,
+    ast: &'a AST<'a>,
 }
 
-impl <'a> ASTPrint {
-    pub fn new(debug_mode: bool) -> ASTPrint {
-        ASTPrint { debug_mode , depth: 0}
+impl <'a> ASTPrint<'a> {
+    pub fn new(debug_mode: bool, ast: &'a AST<'a>) -> ASTPrint<'a> {
+        ASTPrint { debug_mode , depth: 0, ast}
     }
 }
 
-impl <'a> Vistior<'a> for ASTPrint {
+impl <'a> Vistior<'a> for ASTPrint<'a> {
     fn get_order(&self) -> TraversalOrder {
         TraversalOrder::PreOrder
     }
@@ -291,6 +315,11 @@ impl <'a> Vistior<'a> for ASTPrint {
     fn exit(&mut self, node: &ASTNode<'a>) -> () {
         self.depth -= 1;
     }
+
+    fn get_node(&self, node_h: ASTNodeHandle) -> ASTNode<'a> {
+        self.ast.nodes.get(node_h).unwrap().clone()
+    }
+    
 }
 
 

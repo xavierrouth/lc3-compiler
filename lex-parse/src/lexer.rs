@@ -8,8 +8,8 @@ pub struct Lexer<'a> {
     index: usize,
     line_idx: usize, // TODO: Combine line_idx and index
     line_start: usize,
-    row: i32,
-    col: i32,
+    row: usize,
+    col: usize,
     input_stream: &'a str,
     putback: char,
     lines: Vec<&'a str>
@@ -49,7 +49,10 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn get_line(&self, line: usize ) -> Option<&'a str> {
+    pub fn get_line(&mut self, line: usize ) -> Option<&'a str> {
+        while self.lines.get(line).is_none() { // If the line isn't in the buffer, loop until it is.
+            if self.next() == EOF_CHAR {break;}
+        }
         self.lines.get(line).copied()
     }
 
@@ -232,19 +235,19 @@ impl<'a> Lexer<'a> {
             ch
         }
         else {
-            let ch = match self.input_stream.chars().nth(self.row.try_into().unwrap()) {
+            let ch = match self.input_stream.chars().nth(self.col.try_into().unwrap()) {
                 Some(ch) => ch,
                 None => return EOF_CHAR // This is EOF 
             };
-            self.row += 1;
+            self.col += 1;
 
             self.line_idx += ch.len_utf8();
             self.index += ch.len_utf8();
 
             if ch == '\n' {
                 self.advance();
-                self.row = 0;
-                self.col += 1;
+                self.col = 0;
+                self.row += 1;
             }
 
             ch
