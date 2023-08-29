@@ -1,7 +1,7 @@
 use core::{fmt};
-use std::{error};
+use std::{error, cell::RefCell, rc::Rc};
 
-use crate::{token::{Token, TokenKind}, strings::{InternedString, Strings}, error::LexerError};
+use crate::{token::{Token, TokenKind}, strings::{InternedString, Strings}, error::{LexerError, ErrorHandler}};
 
 pub struct Lexer<'a> {
     index: usize,
@@ -11,7 +11,7 @@ pub struct Lexer<'a> {
     col: usize,
     input_stream: &'a str,
     putback: char,
-    lines: Vec<InternedString>,
+    error_handler: Rc<RefCell<ErrorHandler>>,
 }
 
 
@@ -20,7 +20,7 @@ pub(crate) const EOF_CHAR: char = '\0';
 
 impl<'a> Lexer<'a> {
 
-    pub fn new(src: &'a str) -> Lexer<'a> {
+    pub fn new(src: &'a str, error_handler: Rc<RefCell<ErrorHandler>>) -> Lexer<'a> {
         Lexer {
             index: 0,
             line_idx: 0,
@@ -29,15 +29,15 @@ impl<'a> Lexer<'a> {
             col: 0,
             input_stream: src,
             putback: EOF_CHAR,
-            lines: Vec::new(),
+            error_handler
         }
     }
 
     pub fn get_line(&mut self, line: usize ) -> Option<InternedString> {
-        while self.lines.get(line).is_none() { // If the line isn't in the buffer, loop until it is.
+        while self.error_handler.borrow_mut().lines.get(line).is_none(){ // If the line isn't in the buffer, loop until it is.
             if self.next() == EOF_CHAR {break;}
         }
-        self.lines.get(line).copied()
+        self.error_handler.borrow_mut().lines.get(line).copied()
     }
 
     pub fn get_token(&mut self) -> Result<Token, ()> {
@@ -256,7 +256,7 @@ impl<'a> Lexer<'a> {
 
     fn advance(&mut self) -> () {
         let interned_line =  Strings.lock().unwrap().get_or_intern(&self.input_stream[0..self.line_idx]);
-        self.lines.push(interned_line);
+        self.error_handler.borrow_mut().lines.push(interned_line);
         self.input_stream = &self.input_stream[self.line_idx..];
         self.line_idx = 0;
     }
@@ -268,6 +268,10 @@ impl<'a> Lexer<'a> {
 #[cfg(test)]
 mod lexer_tests {
 
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use crate::error::ErrorHandler;
     use crate::lexer::{Lexer};
     use crate::strings::Strings;
     use crate::token::{TokenKind};
@@ -275,7 +279,10 @@ mod lexer_tests {
     #[test]
     fn basic() {
         let src = String::from("+ = -");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+
+        let mut error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler);
+        
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Plus);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Equals);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Minus);
@@ -286,7 +293,10 @@ mod lexer_tests {
     
     fn symbol() {
         let src = String::from("test hi ethan");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+
+        let mut error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler);
+
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("test")));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("hi")));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("ethan")));
@@ -296,7 +306,10 @@ mod lexer_tests {
     #[test]
     fn integer() {
         let src = String::from("3043 423423 120");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+
+        let mut error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler);
+
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
@@ -306,7 +319,10 @@ mod lexer_tests {
     #[test]
     fn float() {
         let src = String::from("3043.434 423423.543 120.654");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+
+        let mut error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler);
+
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
@@ -316,7 +332,10 @@ mod lexer_tests {
     #[test]
     fn decl() {
         let src = String::from("int a;");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
+
+        let mut error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler);
+
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Int);
         Strings.lock().unwrap().get_or_intern("a");
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("a")));

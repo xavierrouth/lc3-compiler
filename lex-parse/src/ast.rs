@@ -34,6 +34,7 @@ pub enum UnaryOpType {
     Address,
     Dereference,
     Negate,
+    Positive,
     LogNot,
     BinNot,
     FunctionCall
@@ -44,13 +45,12 @@ slotmap::new_key_type! { pub struct ASTNodeHandle; }
 // SlotMap is just an arena allocator
 pub struct AST {
     pub nodes: SlotMap<ASTNodeHandle, ASTNode>,
-    pub tokens: SecondaryMap<ASTNodeHandle, Token>, 
     pub root: Option<ASTNodeHandle>,
 }
 
 impl <'a> AST {
     pub fn new() -> AST {
-        AST { nodes: SlotMap::with_key(), tokens: SecondaryMap::new(), root: None}
+        AST { nodes: SlotMap::with_key(), root: None}
     }
 }
 
@@ -238,17 +238,17 @@ pub trait Vistior<'a> {
         self.exit(node_h);
     }
 
-    // Implementations should overload:
-    fn operate(&mut self, _node_h: &ASTNodeHandle) -> () {}
-
-    // Implementations shuold overload
-    fn entry(&mut self, _node_h: &ASTNodeHandle) -> () {}
-
-    fn exit(&mut self, _node_h: &ASTNodeHandle) -> () {}
+    // Implementations must overload:
+    fn operate(&mut self, _node_h: &ASTNodeHandle) -> ();
 
     fn get_order(&self) -> TraversalOrder;
 
     fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode;
+
+    // Optional overload
+    fn entry(&mut self, _node_h: &ASTNodeHandle) -> () {}
+
+    fn exit(&mut self, _node_h: &ASTNodeHandle) -> () {}
 
 }
 

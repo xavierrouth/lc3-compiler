@@ -1,6 +1,6 @@
-use std::{path::PathBuf, fs::File, io::Read};
-use clap::Parser;
-use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}};
+use std::{path::PathBuf, fs::File, io::Read, cell::RefCell, rc::Rc};
+use clap::{Parser, error};
+use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, analysis::{Analyzer, self}, error::ErrorHandler};
 
 #[derive(Parser, Debug)]
 #[command(name = "LC3-Compiler")]
@@ -33,20 +33,31 @@ fn main() {
 
     input_file.read_to_string(&mut input_stream).unwrap();
 
-    let mut lexer: lexer::Lexer<'_> = lexer::Lexer::new(&input_stream);
-    let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer);
+    let error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+
+    let mut lexer: lexer::Lexer<'_> = lexer::Lexer::new(&input_stream, error_handler.clone());
+    let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer, error_handler.clone());
 
     let root = parser.parse_translation_unit();
     // Check errors here
     if let Err(error) = root {
-        parser.print_error(error);
+        error_handler.borrow_mut().print_parser_error(error);
         return;
     }
 
+    let root = root.unwrap();
+
     if cli.verbose {
         let mut printer: ASTPrint = ASTPrint::new(false, &parser.ast);
-        printer.traverse(&root.unwrap());
+        printer.traverse(&root);
     }
+
+    let mut analyzer: Analyzer<'_> = analysis::Analyzer::new(&parser.ast);
+    
+    // Check for analysis errors
+    analyzer.traverse(&root);
+    analyzer.print_symbol_table();
+
 
     //println!("two: {:?}", cli.verbose);
 

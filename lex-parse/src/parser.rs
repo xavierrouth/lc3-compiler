@@ -1,9 +1,10 @@
+use std::cell::RefCell;
 use std::error;
 use std::fmt;
+use std::rc::Rc;
 
-use colored::Colorize;
+use crate::error::{ErrorHandler, ParserError};
 
-use crate::error::ParserError;
 use crate::strings::Strings;
 use crate::strings::{InternedString};
 
@@ -14,24 +15,22 @@ use crate::token::{Token, TokenKind};
 use crate::types::SpecifierInfo;
 use crate::types::TypeInfo;
 
-
-
 pub struct Parser<'a> {
-    putback_stack: Vec<Token>, 
-    lexer: &'a mut Lexer<'a>,
-    token: Token, // The last token that was returend
-    errors: Vec<ParserError>,
     pub ast: AST,
+    lexer: &'a mut Lexer<'a>,
+    error_handler: Rc<RefCell<ErrorHandler>>,
+    putback_stack: Vec<Token>, 
+    token: Token, // The last token that was returend
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(lexer: &'a mut Lexer<'a>) -> Parser<'a> {
+    pub fn new(lexer: &'a mut Lexer<'a>, error_handler: Rc<RefCell<ErrorHandler>>) -> Parser<'a> {
         Parser {
             putback_stack: Vec::new(),
-            lexer: lexer,
             token: Token::default(),
-            errors: Vec::new(),
             ast: AST::new(),
+            error_handler,
+            lexer,
         }
     }
     
@@ -40,43 +39,7 @@ impl<'a> Parser<'a> {
         &self.ast
     } */
 
-    pub fn print_error(&mut self, error: ParserError) -> () {
-        fn get_whitespace(count: usize) -> String {
-            std::iter::repeat(' ').take(count).collect()
-        }
-
-        match error {
-            ParserError::FloatError(msg) => println!( "{msg}"),
-            ParserError::GeneralError(msg, dbg_info) => {
-                if let Some(token) = dbg_info {
-                    println!("{} {msg}", "error:".red());
-                    let line = self.lexer.get_line(token.row).unwrap();
-                    let lock = Strings.lock().unwrap();
-                    let line = lock.resolve(line).unwrap();
-                    print!("line {} | {} ", token.row + 1, line);
-                    println!("{}{}", get_whitespace(8 + token.col), "^".green());
-                }
-                else {
-                    println!("{msg}");
-                }
-            },
-            ParserError::MissingToken(msg, dbg_info) => {
-                if let Some(token) = dbg_info {
-                    println!("{} {msg}", "error:".red());
-                    let line = self.lexer.get_line(token.row).unwrap();
-                    let lock = Strings.lock().unwrap();
-                    let line = lock.resolve(line).unwrap();
-                    print!("line {} | {} ", token.row + 1, line);
-                    println!("{}{}", get_whitespace(7 + token.col + token.length), "^".green());
-                }
-                else {
-                    println!("{msg}");
-                }
-            },
-            ParserError::UnknownError => println!("Something went wrong"),
-        }
-        
-    }
+    
 
     fn get_token(&mut self) -> Token {
         if !self.putback_stack.is_empty() {
@@ -342,7 +305,6 @@ impl<'a> Parser<'a> {
             token_kind @ _ => {
                 // Check if this is a prefix op
                 if let Some(((), r_bp) )= self.prefix_binding_power(&token_kind) {
-                    let child: ASTNodeHandle = self.parse_expression(r_bp)?;
 
                     // Transform tok to op
                     let op: UnaryOpType = match token_kind {
@@ -353,9 +315,13 @@ impl<'a> Parser<'a> {
                         TokenKind::Minus => UnaryOpType::Negate, 
                         TokenKind::Exclamation => UnaryOpType::LogNot,
                         TokenKind::Tilde => UnaryOpType::BinNot,
+                        TokenKind::Plus => UnaryOpType::Positive,
                         _ => {return Err(ParserError::UnknownError)}
                     };
+
                     self.eat_token(token_kind)?;
+                    let child: ASTNodeHandle = self.parse_expression(r_bp)?;
+
                     let node = ASTNode::UnaryOp {op, child, order: true };
                     self.ast.nodes.insert(node)
                 }
@@ -530,7 +496,9 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod parser_tests {
 
+    use std::cell::RefCell;
     use std::mem::{Discriminant, discriminant};
+    use std::rc::Rc;
 
     use crate::ast::{Vistior, ASTCheck, ASTPrint};
     use crate::lexer::{Lexer};
@@ -542,8 +510,11 @@ mod parser_tests {
     #[test]
     fn var_decl() {
         let src = String::from("int a;");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
-        let mut parser: Parser<'_> = Parser::new(& mut lexer);
+        let error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+        
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler.clone());
+        
+        let mut parser: Parser<'_> = Parser::new(& mut lexer, error_handler);
 
         let root = parser.parse_translation_unit().unwrap();
         let ast: &AST = &parser.ast;
@@ -572,8 +543,11 @@ mod parser_tests {
     #[test]
     fn expression() {
         let src = String::from("5 - 10 + (3 * 11)");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
-        let mut parser: Parser<'_> = Parser::new(& mut lexer);
+        let mut error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+        
+        let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler.clone());
+        
+        let mut parser: Parser<'_> = Parser::new(& mut lexer, error_handler);
 
         let root = parser.parse_expression(0);
         let ast: &AST = &parser.ast;

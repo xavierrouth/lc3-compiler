@@ -7,8 +7,8 @@ pub mod parser;
 pub mod ast;
 pub mod lexer;
 pub mod analysis;
+pub mod error;
 
 mod token;
 mod types;
 mod strings;
-mod error;
