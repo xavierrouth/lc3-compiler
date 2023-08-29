@@ -1,6 +1,4 @@
-
-
-
+use crate::strings::InternedString;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -54,9 +52,9 @@ pub enum TokenKind {
     OpenBrace,
     CloseBrace,
 
-    Identifier(String),
+    Identifier(InternedString),
     IntLiteral(i32),
-    StringLiteral(String),
+    StringLiteral(InternedString),
 
     // How to handle comments?
     SlashSlash,

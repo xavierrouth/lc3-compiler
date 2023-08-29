@@ -1,8 +1,7 @@
-use std::collections::HashMap;
-use std::error;
-use std::fmt;
+use core::{fmt};
+use std::{collections::HashMap, error};
 
-use crate::token::{Token, TokenKind};
+use crate::{token::{Token, TokenKind}, strings::{InternedString, Strings}};
 
 pub struct Lexer<'a> {
     index: usize,
@@ -12,7 +11,7 @@ pub struct Lexer<'a> {
     col: usize,
     input_stream: &'a str,
     putback: char,
-    lines: Vec<&'a str>
+    lines: Vec<InternedString>,
 }
 
 #[derive(Debug)]
@@ -36,7 +35,7 @@ pub(crate) const EOF_CHAR: char = '\0';
 
 impl<'a> Lexer<'a> {
 
-    pub fn new(src: &str) -> Lexer<'_> {
+    pub fn new(src: &'a str) -> Lexer<'a> {
         Lexer {
             index: 0,
             line_idx: 0,
@@ -45,11 +44,11 @@ impl<'a> Lexer<'a> {
             col: 0,
             input_stream: src,
             putback: EOF_CHAR,
-            lines: Vec::new()
+            lines: Vec::new(),
         }
     }
 
-    pub fn get_line(&mut self, line: usize ) -> Option<&'a str> {
+    pub fn get_line(&mut self, line: usize ) -> Option<InternedString> {
         while self.lines.get(line).is_none() { // If the line isn't in the buffer, loop until it is.
             if self.next() == EOF_CHAR {break;}
         }
@@ -147,7 +146,7 @@ impl<'a> Lexer<'a> {
                 _ => {self.putback(ch); Ok(TokenKind::Caret)}
             }},
             '"' => {
-                Ok(TokenKind::StringLiteral(self.string_literal().unwrap_or(String::from("oops!"))))
+                Ok(TokenKind::StringLiteral(self.string_literal().unwrap()))
             }
             EOF_CHAR => Ok(TokenKind::EOF),
             '~' => Ok(TokenKind::Tilde),
@@ -168,11 +167,11 @@ impl<'a> Lexer<'a> {
             }
             _ if ch.is_ascii_alphanumeric() || ch == '_' => {
                 let string = self.symbol(ch).unwrap();
-                match string.as_str() {
-                    "auto" => Ok(TokenKind::Auto),
-                    "break" => Ok(TokenKind::Break),
-                    "int" => Ok(TokenKind::Int),
-                    "return" => Ok(TokenKind::Return),
+                match Strings.lock().unwrap().resolve(string) {
+                    Some("auto") => Ok(TokenKind::Auto),
+                    Some("break") => Ok(TokenKind::Break),
+                    Some("int") => Ok(TokenKind::Int),
+                    Some("return") => Ok(TokenKind::Return),
                     // TODO:
                     _  => Ok(TokenKind::Identifier(string))
                 }
@@ -186,7 +185,7 @@ impl<'a> Lexer<'a> {
 
         let length: usize = self.index - start_index;
 
-        let token: Token = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length};
+        let token: Token = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length, };
 
         Ok(token)
     }
@@ -208,23 +207,26 @@ impl<'a> Lexer<'a> {
         Ok(val)
     }
 
-    fn symbol(&mut self, mut ch: char) -> Result<String, ()> {
+    fn symbol(&mut self, mut ch: char) -> Result<InternedString, ()> {
         let mut str: String = String::new();
         while ch.is_ascii_alphanumeric() || ch.is_ascii_digit() || ch == '_' {
             str.push(ch);
             ch = self.next();
         }
         self.putback(ch);
+        
+        let str = Strings.lock().unwrap().get_or_intern(str);
         Ok(str)
     }
 
-    fn string_literal(&mut self) -> Result<String, ()> {
+    fn string_literal(&mut self) -> Result<InternedString, ()> {
         let mut str: String = String::new();
         let mut ch:char = self.next();
         while ch  != '"' {
             str.push(ch);
             ch = self.next();
         }
+        let str = Strings.lock().unwrap().get_or_intern(str);
         Ok(str)
     }
 
@@ -268,7 +270,8 @@ impl<'a> Lexer<'a> {
     } 
 
     fn advance(&mut self) -> () {
-        self.lines.push(&self.input_stream[0..self.line_idx]);
+        let interned_line =  Strings.lock().unwrap().get_or_intern(&self.input_stream[0..self.line_idx]);
+        self.lines.push(interned_line);
         self.input_stream = &self.input_stream[self.line_idx..];
         self.line_idx = 0;
     }
@@ -281,6 +284,7 @@ impl<'a> Lexer<'a> {
 mod lexer_tests {
 
     use crate::lexer::{Lexer};
+    use crate::strings::Strings;
     use crate::token::{TokenKind};
 
     #[test]
@@ -294,14 +298,15 @@ mod lexer_tests {
     }
 
     #[test]
+    
     fn symbol() {
         let src = String::from("test hi ethan");
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("test".to_string()));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("hi".to_string()));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("ethan".to_string()));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("test")));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("hi")));
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("ethan")));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
-    }
+    } 
 
     #[test]
     fn integer() {
@@ -328,7 +333,8 @@ mod lexer_tests {
         let src = String::from("int a;");
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Int);
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier("a".to_string()));
+        Strings.lock().unwrap().get_or_intern("a");
+        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Identifier(Strings.lock().unwrap().get_or_intern("a")));
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Semicolon);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
     }

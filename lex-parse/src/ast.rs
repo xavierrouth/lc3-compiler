@@ -3,6 +3,7 @@ use slotmap::{SlotMap, SecondaryMap};
 use std::fmt;
 use std::mem::Discriminant;
 
+use crate::strings::{InternedString, Strings};
 use crate::types::{TypeInfo};
 use crate::token::{Token, TokenKind};
 
@@ -42,20 +43,21 @@ pub enum UnaryOpType {
 slotmap::new_key_type! { pub struct ASTNodeHandle; }
 
 // SlotMap is just an arena allocator
-pub struct AST<'a> {
-    pub nodes: SlotMap<ASTNodeHandle, ASTNode<'a>>,
+pub struct AST {
+    pub nodes: SlotMap<ASTNodeHandle, ASTNode>,
+    pub tokens: SecondaryMap<ASTNodeHandle, Token>, 
     pub root: Option<ASTNodeHandle>,
 }
 
-impl <'a> AST<'a> {
-    pub fn new() -> AST<'a> {
-        AST { nodes: SlotMap::with_key(), root: None}
+impl <'a> AST {
+    pub fn new() -> AST {
+        AST { nodes: SlotMap::with_key(), tokens: SecondaryMap::new(), root: None}
     }
 }
 
 // Todo: Split into different lifetimes, one for nodes one for token references.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ASTNode<'a> {
+pub enum ASTNode {
     // ==== Declarations: ====
     Program { 
         declarations: Vec<ASTNodeHandle>,
@@ -63,15 +65,15 @@ pub enum ASTNode<'a> {
     FunctionDecl {
         body: ASTNodeHandle,
         parameters: Vec<ASTNodeHandle>,
-        identifier: Token,
+        identifier: InternedString,
         return_type: TypeInfo
     },
     ParameterDecl {
-        identifier: Token,
+        identifier: InternedString,
         r#type: TypeInfo
     },
     VariableDecl {
-        identifier: Token,
+        identifier: InternedString,
         initializer: Option<ASTNodeHandle>,
         r#type: TypeInfo
     },
@@ -84,7 +86,7 @@ pub enum ASTNode<'a> {
         arguments: Vec<ASTNodeHandle>,
     },
     SymbolRef {
-        identifier: Token,
+        identifier: InternedString,
         //r#type: TypeInfo<'a>,
     },
     BinaryOp {
@@ -132,7 +134,7 @@ pub enum ASTNode<'a> {
         declarations: Vec<ASTNodeHandle>,
     },
     InlineAsm {
-        assembly: &'a str,
+        assembly: InternedString,
     }
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -146,12 +148,12 @@ pub trait Vistior<'a> {
     fn traverse(&mut self, node_h: &ASTNodeHandle) -> () {
         let order: TraversalOrder = self.get_order();
 
-        let node: &ASTNode<'_> = &self.get_node(*node_h);
+        let node: ASTNode = self.get_node(node_h).clone();
 
-        self.entry(node);
+        self.entry(node_h);
 
         if order == TraversalOrder::PreOrder {
-            self.operate(node);
+            self.operate(node_h);
         }
 
         match node {
@@ -231,34 +233,34 @@ pub trait Vistior<'a> {
         }
 
         if order == TraversalOrder::PostOrder {
-            self.operate(node);
+            self.operate(node_h);
         }
 
-        self.exit(node);
+        self.exit(node_h);
     }
 
     // Implementations should overload:
-    fn operate(&mut self, node: &ASTNode<'a>) -> () {}
+    fn operate(&mut self, node_h: &ASTNodeHandle) -> () {}
 
     // Implementations shuold overload
-    fn entry(&mut self, node: &ASTNode<'a>) -> () {}
+    fn entry(&mut self, node_h: &ASTNodeHandle) -> () {}
 
-    fn exit(&mut self, node: &ASTNode<'a>) -> () {}
+    fn exit(&mut self, node_h: &ASTNodeHandle) -> () {}
 
     fn get_order(&self) -> TraversalOrder;
 
-    fn get_node(&self, node_h: ASTNodeHandle) -> ASTNode<'a>;
+    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode;
 
 }
 
 // AST Checker
 pub struct ASTCheck<'a> {
-    pub results: Vec<Discriminant<ASTNode<'a>>>,
-    ast: &'a AST<'a>,
+    pub results: Vec<Discriminant<ASTNode>>,
+    ast: &'a AST,
 }
 
 impl<'a> ASTCheck<'a>{
-    pub fn new(ast: &'a AST<'a>) -> ASTCheck<'a> {
+    pub fn new(ast: &'a AST) -> ASTCheck<'a> {
         ASTCheck { results: Vec::new(), ast}
     }
 }
@@ -268,12 +270,14 @@ impl <'a> Vistior<'a> for ASTCheck<'a> {
         TraversalOrder::PreOrder
     }
 
-    fn operate(&mut self, node: &ASTNode<'a>) -> () {
-        self.results.push(std::mem::discriminant(node));
+    fn operate(&mut self, node_h: &ASTNodeHandle) -> () {
+        let node = self.get_node(node_h);
+        self.results.push(std::mem::discriminant(&node));
     }
 
-    fn get_node(&self, node_h: ASTNodeHandle) -> ASTNode<'a> {
-        self.ast.nodes.get(node_h).unwrap().clone()
+    // Why is this clone?
+    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
+        self.ast.nodes.get(*node_h).unwrap()
     }
 }
 
@@ -282,11 +286,11 @@ impl <'a> Vistior<'a> for ASTCheck<'a> {
 pub struct ASTPrint<'a> {
     pub debug_mode: bool,
     pub depth: usize,
-    ast: &'a AST<'a>,
+    ast: &'a AST,
 }
 
 impl <'a> ASTPrint<'a> {
-    pub fn new(debug_mode: bool, ast: &'a AST<'a>) -> ASTPrint<'a> {
+    pub fn new(debug_mode: bool, ast: &'a AST) -> ASTPrint<'a> {
         ASTPrint { debug_mode , depth: 0, ast}
     }
 }
@@ -296,8 +300,9 @@ impl <'a> Vistior<'a> for ASTPrint<'a> {
         TraversalOrder::PreOrder
     }
 
-    fn operate(&mut self, node: &ASTNode<'a>) -> () {
+    fn operate(&mut self, node_h: &ASTNodeHandle) -> () {
         // TODO: Condition on debug mdoe vs pretty mode
+        let node = self.get_node(node_h);
         let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
         if (self.debug_mode) {
             println!("{whitespace_string}{:?}", node)
@@ -308,22 +313,22 @@ impl <'a> Vistior<'a> for ASTPrint<'a> {
         
     }
 
-    fn entry(&mut self, node: &ASTNode<'a>) -> () {
+    fn entry(&mut self, node_h: &ASTNodeHandle) -> () {
         self.depth += 1;
     }
 
-    fn exit(&mut self, node: &ASTNode<'a>) -> () {
+    fn exit(&mut self, node_h: &ASTNodeHandle) -> () {
         self.depth -= 1;
     }
 
-    fn get_node(&self, node_h: ASTNodeHandle) -> ASTNode<'a> {
-        self.ast.nodes.get(node_h).unwrap().clone()
+    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
+        self.ast.nodes.get(*node_h).unwrap()
     }
     
 }
 
 
-impl fmt::Display for ASTNode<'_> {
+impl fmt::Display for ASTNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ASTNode::BinaryOp { op, right, left } => {
@@ -336,29 +341,15 @@ impl fmt::Display for ASTNode<'_> {
                 write!(f, "<Program>")
             },
             ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
-                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
-                    write!(f, "<FunctionDecl, {}>", str)
-                }
-                else {
-                    write!(f, "<FunctionDecl, missing name>")
-                }
+                
+                write!(f, "<FunctionDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
             },
             // TODO: Find some way to pritn type info
             ASTNode::ParameterDecl { identifier, r#type } => {
-                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
-                    write!(f, "<ParameterDecl, {}>", str)
-                }
-                else {
-                    write!(f, "<ParameterDecl, missing name>")
-                }
+                write!(f, "<ParameterDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
             }
             ASTNode::VariableDecl { identifier, initializer, r#type } => {
-                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
-                    write!(f, "<VariableDecl, {}>", str)
-                }
-                else {
-                    write!(f, "<VariableDecl, missing name>")
-                }
+                write!(f, "<VariableDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
             },
             ASTNode::IntLiteral { value } => {
                 write!(f, "<IntLiteral, {}>", value)
@@ -367,12 +358,7 @@ impl fmt::Display for ASTNode<'_> {
                 write!(f, "<FunctionCall>")
             },
             ASTNode::SymbolRef { identifier } => {
-                if let TokenKind::Identifier(str ) = identifier.kind.clone() {
-                    write!(f, "<SymbolRef, {}>", str)
-                }
-                else {
-                    write!(f, "<SymbolRef, missing name>")
-                } 
+                write!(f, "<SymbolRef, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
             },
             ASTNode::UnaryOp { op, child, order } => {
                 write!(f, "<UnaryOp, op: {:?}, preorder: {:?}>", op, order)

@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 colored = "2"
 slotmap = "1.0"
+string-interner = "0.14"
+lazy_static = "1.4.0"
 

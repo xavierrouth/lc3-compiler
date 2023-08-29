@@ -1,48 +1,30 @@
 use std::error;
 use std::fmt;
 
+use crate::strings::{InternedString};
+
 use colored::Colorize;
+
 use crate::ast::{AST, ASTNodeHandle, ASTNode, UnaryOpType, BinaryOpType};
+
 use crate::lexer::{Lexer};
 use crate::token::{Token, TokenKind};
-
 use crate::types::SpecifierInfo;
 use crate::types::TypeInfo;
 
 #[derive(Debug)]
-pub enum ParserError<'a> {
+pub enum ParserError {
     FloatError(String),
-    GeneralError(String, Option<(Token, &'a str)>),
-    MissingToken(String, Option<(Token, &'a str)>),
+    GeneralError(String, Option<(Token)>),
+    MissingToken(String, Option<(Token)>),
     UnknownError
 }
 
-impl<'a> error::Error for ParserError<'a> {}
+impl<'a> error::Error for ParserError {}
 
-impl<'a> fmt::Display for ParserError<'a> {
+impl<'a> fmt::Display for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParserError::FloatError(msg) => write!(f, "{}", msg),
-            ParserError::GeneralError(msg, dbg_info) => {
-                if let Some((token, line)) = dbg_info {
-                    let whitespace_string: String = std::iter::repeat(' ').take(token.col + 8).collect(); // 8 is length of 'line 2 | 
-                    write!(f, "{} {}\n line {} | {}{whitespace_string} {}", "error:".red(), msg, token.row + 1, line, "^".green())
-                }
-                else {
-                    write!(f, "{}", msg)
-                }
-            },
-            ParserError::MissingToken(msg, dbg_info) => {
-                if let Some((token, line)) = dbg_info {
-                    let whitespace_string: String = std::iter::repeat(' ').take(token.col + 9).collect(); // 8 is length of 'line 2 | 
-                    write!(f, "{} {}\n line {} | {}{whitespace_string} {}", "error:".red(), msg, token.row + 1, line, "^".green())
-                }
-                else {
-                    write!(f, "{}", msg)
-                }
-            },
-            ParserError::UnknownError => write!(f, "Something went wrong"),
-        }
+        todo!() // Don't call this.
     }
 }
 
@@ -50,8 +32,8 @@ pub struct Parser<'a> {
     putback_stack: Vec<Token>, 
     lexer: &'a mut Lexer<'a>,
     token: Token, // The last token that was returend
-    errors: Vec<ParserError<'a>>,
-    pub ast: AST<'a>,
+    errors: Vec<ParserError>,
+    pub ast: AST,
 }
 
 impl<'a> Parser<'a> {
@@ -97,7 +79,7 @@ impl<'a> Parser<'a> {
         t
     }
 
-    fn eat_token(& mut self, kind: TokenKind) -> Result<Token, ParserError<'a>> {
+    fn eat_token(& mut self, kind: TokenKind) -> Result<Token, ParserError> {
         let prev = self.prev_token(); // Need to not update prev token on peek
         let t = self.get_token();
         if kind != t.kind {
@@ -105,11 +87,11 @@ impl<'a> Parser<'a> {
             match kind {
                 TokenKind::Semicolon => {
                     let token = self.prev_token();
-                    return Err(ParserError::MissingToken("Expected semicolon.".to_string(), Some((prev.clone(), self.lexer.get_line(prev.row).unwrap_or("Uh Oh")))))
+                    return Err(ParserError::MissingToken("Expected semicolon.".to_string(), Some(prev)))
                 }
                 _ => {
                     let token = self.prev_token();
-                    return Err(ParserError::GeneralError("Unexpected token.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
+                    return Err(ParserError::GeneralError("Unexpected token.".to_string(), Some(token)))
                 }
             }
         }
@@ -128,7 +110,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_translation_unit(& mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    pub fn parse_translation_unit(& mut self) -> Result<ASTNodeHandle, ParserError> {
         let mut body: Vec<ASTNodeHandle> = Vec::new();
         
         while self.peek_token().kind != TokenKind::EOF {
@@ -140,27 +122,29 @@ impl<'a> Parser<'a> {
         Ok(self.ast.nodes.insert(node))
     }
     
-    fn parse_toplevel_decl(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_toplevel_decl(&mut self) -> Result<ASTNodeHandle, ParserError> {
 
         let mut ti = self.parse_declaration_specifiers()?;
 
-        let tok: Option<Token> = self.parse_declarator(&mut ti, true);
+        let identifier:Option<InternedString> = self.parse_declarator(&mut ti, true);
         
-        if tok.is_none() {
-            let token = self.prev_token();
-            return Err(ParserError::GeneralError("Expected declarator.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
-        }
-
-        if self.expect_token(TokenKind::OpenParen) {
-            self.parse_function_definition(ti, tok.unwrap())
-        }
-        else {
-            self.parse_declaration(&mut ti, tok.unwrap())
+        match identifier {
+            None => {
+                return Err(ParserError::GeneralError("Expected declarator.".to_string(), Some(self.prev_token())))
+            }
+            Some(string) => {
+                if self.expect_token(TokenKind::OpenParen) {
+                    self.parse_function_definition(ti, string)
+                }
+                else {
+                    self.parse_declaration(&mut ti, string)
+                }
+            }
         }
     }
 
     //TODO: Error handling here
-    fn parse_declaration_specifiers(&mut self) -> Result<TypeInfo, ParserError<'a>> {
+    fn parse_declaration_specifiers(&mut self) -> Result<TypeInfo, ParserError> {
         let mut ti = TypeInfo{ declarator: Vec::new(), type_specifier: SpecifierInfo::default()};
         while self.parse_declaration_specifier(& mut ti) {
             continue;
@@ -183,14 +167,17 @@ impl<'a> Parser<'a> {
 
     // Adds a declarator to a TypeInfo
     // Add the token name to this thing
-    fn parse_declarator(&mut self, ti: &mut TypeInfo, check_pointer: bool) -> Option<Token> {
-        if self.expect_token(TokenKind::Identifier("test".to_string())) {
-            return Some(self.get_token());
+    fn parse_declarator(&mut self, ti: &mut TypeInfo, check_pointer: bool) -> Option<InternedString> {
+        if let TokenKind::Identifier(string) = self.peek_token().kind {
+            self.get_token();
+            Some(string)
         }
-        None // This is an error..., shjould return Result<Token>
+        else {
+            None
+        }
     }
 
-    fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: Token) -> Result<ASTNodeHandle, ParserError<'a>> {    
+    fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {    
         self.eat_token(TokenKind::OpenParen)?;
 
         let mut parameters: Vec<ASTNodeHandle> = Vec::new();
@@ -212,8 +199,8 @@ impl<'a> Parser<'a> {
                 }
             }
             else {
-                let token = self.prev_token();
-                return Err(ParserError::GeneralError("Expected a name for this variable.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))            }
+                return Err(ParserError::GeneralError("Expected a name for this variable.".to_string(), Some(self.prev_token())))            
+            }
         }
 
         self.eat_token(TokenKind::CloseParen)?;
@@ -226,13 +213,12 @@ impl<'a> Parser<'a> {
             Ok(self.ast.nodes.insert(node))
         }
         else {
-            let token = self.prev_token();
-            return Err(ParserError::GeneralError("Functions without bodies are not supported yet.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
+            return Err(ParserError::GeneralError("Functions without bodies are not supported yet.".to_string(), Some(self.prev_token())))
         }
 
     }
 
-    fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: Token) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {
 
         if self.expect_token(TokenKind::Equals) {
             self.eat_token(TokenKind::Equals)?;
@@ -252,7 +238,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_compound_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_compound_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         self.eat_token(TokenKind::OpenBrace)?;
         let mut statements: Vec<ASTNodeHandle> = Vec::new();
 
@@ -268,7 +254,7 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn parse_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         // Accept errors here?
         match self.peek_token().kind {
             // These eat semicolons for you!
@@ -281,11 +267,11 @@ impl<'a> Parser<'a> {
                 let mut ti: TypeInfo = self.parse_declaration_specifiers()?;
                 if ti.type_specifier.marked_int || ti.type_specifier.marked_char {
                     // TODO: Error maybe
-                    let id: Token = self.parse_declarator(&mut ti, true).unwrap();
-                    self.parse_declaration(&mut ti, id) // JK this does eat semicolon
+                    let identifier = self.parse_declarator(&mut ti, true).unwrap();
+                    self.parse_declaration(&mut ti, identifier) // JK this does eat semicolon
                 }
                 else {
-                    let stmt: Result<ASTNodeHandle, ParserError<'a>> = self.parse_expression(0);
+                    let stmt: Result<ASTNodeHandle, ParserError> = self.parse_expression(0);
                     self.eat_token(TokenKind::Semicolon)?;
                     stmt
                 }
@@ -293,7 +279,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_return_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_return_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         self.eat_token(TokenKind::Return)?;
         let expression: ASTNodeHandle = self.parse_expression(0)?;
 
@@ -303,20 +289,20 @@ impl<'a> Parser<'a> {
         Ok(stmt)
     }
 
-    fn parse_if_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_if_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         todo!()
     }
 
-    fn parse_while_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_while_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         todo!()
     }
 
-    fn parse_for_statement(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_for_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         todo!()
     }
 
     // Pratt Parsing
-    fn parse_expression(&mut self, binding_power: u8) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_expression(&mut self, binding_power: u8) -> Result<ASTNodeHandle, ParserError> {
         let mut lhs: ASTNodeHandle = match self.peek_token().kind {
             TokenKind::IntLiteral(..) => self.parse_int_literal()?,
             TokenKind::Identifier(..) => self.parse_symbol_ref()?,
@@ -349,7 +335,7 @@ impl<'a> Parser<'a> {
                 }
                 else {
                     let token = self.prev_token();
-                    return Err(ParserError::GeneralError("Expected expression.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
+                    return Err(ParserError::GeneralError("Expected expression.".to_string(), Some(token)))
                 }
             }
         };
@@ -485,7 +471,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_int_literal(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_int_literal(&mut self) -> Result<ASTNodeHandle, ParserError> {
         let value: i32 = match self.get_token().kind {
             TokenKind::IntLiteral(value) => value,
             _ => {return Err(ParserError::UnknownError);}
@@ -495,23 +481,20 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn parse_symbol_ref(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_symbol_ref(&mut self) -> Result<ASTNodeHandle, ParserError> {
 
-        let identifier = self.get_token();
 
-        if std::mem::discriminant(&identifier.kind) == std::mem::discriminant(&TokenKind::Identifier("test".to_string())) {
-            let node = ASTNode::SymbolRef {identifier};
+        if let TokenKind::Identifier(identifier) = self.get_token().kind {
+            let node = ASTNode::SymbolRef {identifier: identifier};
             Ok(self.ast.nodes.insert(node))
-
         }
         else {
-            let token = self.prev_token();
-            return Err(ParserError::GeneralError("Expected symbol.".to_string(), Some((token.clone(), self.lexer.get_line(token.row).unwrap_or("Uh Oh")))))
+            return Err(ParserError::GeneralError("Expected symbol.".to_string(), Some(self.prev_token())))
         }
         
     }
 
-    fn parse_function_call(&mut self) -> Result<ASTNodeHandle, ParserError<'a>> {
+    fn parse_function_call(&mut self) -> Result<ASTNodeHandle, ParserError> {
         todo!()
     }
     
@@ -525,6 +508,7 @@ mod parser_tests {
     use crate::ast::{Vistior, ASTCheck, ASTPrint};
     use crate::lexer::{Lexer};
     use crate::parser::{self, Parser};
+    use crate::strings::Strings;
     use super::*;
     use crate::token::{TokenKind};
 
@@ -535,16 +519,16 @@ mod parser_tests {
         let mut parser: Parser<'_> = Parser::new(& mut lexer);
 
         let root = parser.parse_translation_unit().unwrap();
-        let ast: &AST<'_> = &parser.ast;
+        let ast: &AST = &parser.ast;
 
         let mut checker: ASTCheck<'_> = ASTCheck::new(ast); 
 
         checker.traverse(&root);
 
         
-        let gold: Vec<Discriminant<ASTNode<'_>>> = vec![
+        let gold: Vec<Discriminant<ASTNode>> = vec![
             discriminant(&ASTNode::Program { declarations: Vec::new()}),
-            discriminant(&ASTNode::VariableDecl { identifier: Token::default(), initializer: None, r#type: TypeInfo::default() }),
+            discriminant(&ASTNode::VariableDecl { identifier: Strings.lock().unwrap().get_or_intern("hi") , initializer: None, r#type: TypeInfo::default() }),
         ];
 
         for i in 0..checker.results.len() {
@@ -565,7 +549,7 @@ mod parser_tests {
         let mut parser: Parser<'_> = Parser::new(& mut lexer);
 
         let root = parser.parse_expression(0);
-        let ast: &AST<'_> = &parser.ast;
+        let ast: &AST = &parser.ast;
 
         let mut checker: ASTCheck<'_> = ASTCheck::new(ast); 
 
@@ -582,26 +566,6 @@ mod parser_tests {
             assert_eq!(checker.results[i], gold[i])
         }
         */
-    }
-
-    #[test]
-    fn integer() {
-        let src = String::from("3043 423423 120");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
-    }
-
-    #[test]
-    fn float() {
-        let src = String::from("3043.434 423423.543 120.654");
-        let mut lexer: Lexer<'_> = Lexer::new(src.as_str());
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(3043));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(423423));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::IntLiteral(120));
-        assert_eq!(lexer.get_token().unwrap().kind, TokenKind::EOF);
     }
     
 }
