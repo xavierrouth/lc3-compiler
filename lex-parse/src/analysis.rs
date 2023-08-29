@@ -1,13 +1,13 @@
 
 
-use std::cell::RefCell;
-use std::ops::Deref;
-use std::rc::Rc;
 
-use slotmap::{SlotMap, SparseSecondaryMap, SecondaryMap};
+
+
+
+use slotmap::{SparseSecondaryMap};
 use crate::ast::{Vistior, AST, ASTNode, ASTNodeHandle, TraversalOrder};
 use crate::strings::InternedString;
-use crate::token::{Token, TokenKind};
+
 use crate::types::TypeInfo;
 
 #[derive(Debug)]
@@ -57,7 +57,7 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub fn search_scope(&mut self, identifier: &InternedString, entry_type: &STEntryType) -> Option<STEntry> {
+    pub fn search_scope(&mut self, identifier: &InternedString, _entry_type: &STEntryType) -> Option<STEntry> {
 
         for entry in self.stack.last().unwrap().var_entries.as_slice() {
             if entry.identifier == *identifier {
@@ -102,7 +102,7 @@ impl <'a> Analyzer<'a> {
         Analyzer { symbol_table: SymbolTable {entries: SparseSecondaryMap::new(), stack: Vec::new()}, ast: ast }
     }
 
-    fn enter_scope(&mut self, next_param_slot: i32, next_variable_slot: i32) -> () {
+    fn enter_scope(&mut self, _next_param_slot: i32, _next_variable_slot: i32) -> () {
         self.symbol_table.stack.push(STScope::new());
     }
 
@@ -123,17 +123,17 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
         TraversalOrder::PreOrder
     }
 
-    fn entry(&mut self, node_h: &ASTNodeHandle) -> () {
+    fn entry(&mut self, _node_h: &ASTNodeHandle) -> () {
        
     }
 
     fn exit(&mut self, node_h: &ASTNodeHandle) -> () {
         let node = self.get_node(node_h);
         match node {
-            ASTNode::CompoundStmt { statements, new_scope } => {
+            ASTNode::CompoundStmt { statements: _, new_scope } => {
                 if *new_scope {self.exit_scope();}
             }
-            ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
+            ASTNode::FunctionDecl { body: _, parameters: _, identifier: _, return_type: _ } => {
                 self.exit_scope();
             }
             
@@ -142,10 +142,10 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
     }
 
     fn operate(&mut self, node_h: &ASTNodeHandle) -> () {
-        let node = self.get_node(node_h);
+        let node = self.get_node(node_h).clone();
         match node {
-            ASTNode::CompoundStmt { statements, new_scope } => {
-                if *new_scope == true {
+            ASTNode::CompoundStmt { statements: _, new_scope } => {
+                if new_scope == true {
                     // Copy over offsets, because we stil are on the same stack frame.
                     let next_param_slot = self.curr_scope().next_param_slot;
                     let next_variable_slot = self.curr_scope().next_variable_slot;
@@ -153,17 +153,17 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     self.enter_scope(next_param_slot, next_variable_slot);
                 }
             },
-            ASTNode::VariableDecl { identifier, initializer, r#type } => {
+            ASTNode::VariableDecl { identifier, initializer: _, r#type } => {
                 // Make a new entry
                 
                 let scope = self.curr_scope();
 
                 let entry = STEntry {
-                    identifier: *identifier,
+                    identifier: identifier,
                     size: 1,
                     offset: scope.next_variable_slot * -1,
                     kind: STEntryType::VarOrParam,
-                    type_info: *r#type,
+                    type_info: r#type,
                 };
                 scope.next_variable_slot += 1;
 
@@ -176,11 +176,11 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 let scope = self.curr_scope();
 
                 let entry = STEntry {
-                    identifier: *identifier,
+                    identifier: identifier,
                     size: 1,
                     offset: scope.next_param_slot + 4,
                     kind: STEntryType::VarOrParam,
-                    type_info: *r#type,
+                    type_info: r#type,
                 };
                 scope.next_param_slot += 1;
 
@@ -189,17 +189,17 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
             }
             ASTNode::FunctionDecl { body: _, parameters: _, identifier, return_type } => {
                 let entry = STEntry {
-                    identifier: *identifier,
+                    identifier: identifier,
                     size: 1,
                     offset: 0,
                     kind: STEntryType::VarOrParam,
-                    type_info: *r#return_type,
+                    type_info: r#return_type,
                 };
 
                 // Need some way to error out here:
                 self.symbol_table.add(*node_h, entry);
             }
-            ASTNode::ForStmt { initializer, condition, update, body } => {
+            ASTNode::ForStmt { initializer: _, condition: _, update: _, body: _ } => {
                 let next_param_slot = self.curr_scope().next_param_slot;
                 let next_variable_slot = self.curr_scope().next_variable_slot;
                 // TODO: Distinguish between scopes / stack frames?
@@ -217,7 +217,7 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 }
                 
             }
-            ASTNode::FunctionCall { symbol_ref, arguments } => {
+            ASTNode::FunctionCall { symbol_ref: _, arguments: _ } => {
                 // Need to do make sure this is a valid function, .i.e search up scope for it's symbol.
                 // Oh well, we can just do it later, otherwise we need to explicitly state that we have already handled this node and its children, and not call operate on the child reference.
             }

@@ -1,7 +1,7 @@
 use core::{fmt};
-use std::{collections::HashMap, error};
+use std::{error};
 
-use crate::{token::{Token, TokenKind}, strings::{InternedString, Strings}};
+use crate::{token::{Token, TokenKind}, strings::{InternedString, Strings}, error::LexerError};
 
 pub struct Lexer<'a> {
     index: usize,
@@ -14,22 +14,7 @@ pub struct Lexer<'a> {
     lines: Vec<InternedString>,
 }
 
-#[derive(Debug)]
-pub enum LexerError {
-    FloatError(String),
-    UnknownError
-}
 
-impl error::Error for LexerError {}
-
-impl fmt::Display for LexerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LexerError::FloatError(msg) => write!(f, "{}", msg),
-            LexerError::UnknownError => write!(f, "Something went wrong"),
-        }
-    }
-}
 
 pub(crate) const EOF_CHAR: char = '\0';
 

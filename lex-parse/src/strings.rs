@@ -1,10 +1,9 @@
-use std::{cell::RefCell, sync::Mutex};
+#[allow(non_upper_case_globals)]
+
+use std::{sync::Mutex};
 
 // Do a custom string interner eventually.
 use string_interner::{backend::StringBackend, symbol::SymbolU16, StringInterner};
-
-
-
 
 pub type InternedString = SymbolU16;
 

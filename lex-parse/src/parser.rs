@@ -1,9 +1,11 @@
 use std::error;
 use std::fmt;
 
-use crate::strings::{InternedString};
-
 use colored::Colorize;
+
+use crate::error::ParserError;
+use crate::strings::Strings;
+use crate::strings::{InternedString};
 
 use crate::ast::{AST, ASTNodeHandle, ASTNode, UnaryOpType, BinaryOpType};
 
@@ -12,21 +14,7 @@ use crate::token::{Token, TokenKind};
 use crate::types::SpecifierInfo;
 use crate::types::TypeInfo;
 
-#[derive(Debug)]
-pub enum ParserError {
-    FloatError(String),
-    GeneralError(String, Option<(Token)>),
-    MissingToken(String, Option<(Token)>),
-    UnknownError
-}
 
-impl<'a> error::Error for ParserError {}
-
-impl<'a> fmt::Display for ParserError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!() // Don't call this.
-    }
-}
 
 pub struct Parser<'a> {
     putback_stack: Vec<Token>, 
@@ -51,6 +39,44 @@ impl<'a> Parser<'a> {
     pub fn get_ast(&mut self) -> &'a AST<'a> {
         &self.ast
     } */
+
+    pub fn print_error(&mut self, error: ParserError) -> () {
+        fn get_whitespace(count: usize) -> String {
+            std::iter::repeat(' ').take(count).collect()
+        }
+
+        match error {
+            ParserError::FloatError(msg) => println!( "{msg}"),
+            ParserError::GeneralError(msg, dbg_info) => {
+                if let Some(token) = dbg_info {
+                    println!("{} {msg}", "error:".red());
+                    let line = self.lexer.get_line(token.row).unwrap();
+                    let lock = Strings.lock().unwrap();
+                    let line = lock.resolve(line).unwrap();
+                    print!("line {} | {} ", token.row + 1, line);
+                    println!("{}{}", get_whitespace(8 + token.col), "^".green());
+                }
+                else {
+                    println!("{msg}");
+                }
+            },
+            ParserError::MissingToken(msg, dbg_info) => {
+                if let Some(token) = dbg_info {
+                    println!("{} {msg}", "error:".red());
+                    let line = self.lexer.get_line(token.row).unwrap();
+                    let lock = Strings.lock().unwrap();
+                    let line = lock.resolve(line).unwrap();
+                    print!("line {} | {} ", token.row + 1, line);
+                    println!("{}{}", get_whitespace(7 + token.col + token.length), "^".green());
+                }
+                else {
+                    println!("{msg}");
+                }
+            },
+            ParserError::UnknownError => println!("Something went wrong"),
+        }
+        
+    }
 
     fn get_token(&mut self) -> Token {
         if !self.putback_stack.is_empty() {
@@ -86,7 +112,7 @@ impl<'a> Parser<'a> {
             //todo
             match kind {
                 TokenKind::Semicolon => {
-                    let token = self.prev_token();
+                    let _token = self.prev_token();
                     return Err(ParserError::MissingToken("Expected semicolon.".to_string(), Some(prev)))
                 }
                 _ => {
@@ -167,7 +193,7 @@ impl<'a> Parser<'a> {
 
     // Adds a declarator to a TypeInfo
     // Add the token name to this thing
-    fn parse_declarator(&mut self, ti: &mut TypeInfo, check_pointer: bool) -> Option<InternedString> {
+    fn parse_declarator(&mut self, _ti: &mut TypeInfo, _check_pointer: bool) -> Option<InternedString> {
         if let TokenKind::Identifier(string) = self.peek_token().kind {
             self.get_token();
             Some(string)
@@ -400,6 +426,7 @@ impl<'a> Parser<'a> {
                     TokenKind::Percent => BinaryOpType::Mod, 
                     TokenKind::AndAnd => BinaryOpType::LogAnd,
                     TokenKind::BarBar => BinaryOpType::LogOr,
+                    TokenKind::Equals => BinaryOpType::Assign,
                     _ => {return Err(ParserError::UnknownError)}
                 };
 
@@ -507,10 +534,10 @@ mod parser_tests {
 
     use crate::ast::{Vistior, ASTCheck, ASTPrint};
     use crate::lexer::{Lexer};
-    use crate::parser::{self, Parser};
+    use crate::parser::{Parser};
     use crate::strings::Strings;
     use super::*;
-    use crate::token::{TokenKind};
+    
 
     #[test]
     fn var_decl() {

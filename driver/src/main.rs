@@ -39,7 +39,7 @@ fn main() {
     let root = parser.parse_translation_unit();
     // Check errors here
     if let Err(error) = root {
-        println!("{}", error);
+        parser.print_error(error);
         return;
     }
 

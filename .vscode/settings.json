@@ -3,6 +3,7 @@
         "./lex-parse/Cargo.toml",
         "./lex-parse/Cargo.toml",
         "./lex-parse/Cargo.toml",
+        "./lex-parse/Cargo.toml",
         "./lex-parse/Cargo.toml"
     ]
 }
