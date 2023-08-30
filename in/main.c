@@ -1,13 +1,6 @@
 
 int main() {
-
-
-
-
-
-
-
-
-
-    int ;            pringle
+    int a;
+    a = 3 + 7;
+    3 + 6;
 }

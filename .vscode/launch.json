@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-v", "in/main.c"],
+            "args": ["-v", "in/main.c", "-o", "out/out.asm"],
             "cwd": "${workspaceFolder}"
         },
         {

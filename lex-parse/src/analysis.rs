@@ -50,10 +50,10 @@ pub enum STEntryType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct STEntry {
-    identifier: InternedString, // TODO Make this a string
-    size: usize,
-    offset: i32,
-    type_info: TypeInfo,
+    pub identifier: InternedString, // TODO Make this a string
+    pub size: usize,
+    pub offset: i32,
+    pub type_info: TypeInfo,
     kind: STEntryType
 } 
 
@@ -64,7 +64,7 @@ impl fmt::Display for STEntry {
 }
 
 pub struct SymbolTable {
-    entries: SparseSecondaryMap<ASTNodeHandle, STEntry>,
+    pub entries: SparseSecondaryMap<ASTNodeHandle, STEntry>,
     stack: Vec<STScope>, // Reference to a STScope
 }
 
@@ -115,7 +115,7 @@ impl SymbolTable {
 
 /** Analysis pass on AST, borrows AST while it is alive. */
 pub struct Analyzer<'a> {
-    symbol_table: SymbolTable, // 
+    pub symbol_table: SymbolTable, // 
     ast: &'a AST,
     error_handler: Rc<RefCell<ErrorHandler>>,
     halt: bool,

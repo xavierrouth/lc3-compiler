@@ -37,7 +37,6 @@ pub enum UnaryOpType {
     Positive,
     LogNot,
     BinNot,
-    FunctionCall
 }
 
 slotmap::new_key_type! { pub struct ASTNodeHandle; }
@@ -51,6 +50,10 @@ pub struct AST {
 impl <'a> AST {
     pub fn new() -> AST {
         AST { nodes: SlotMap::with_key(), root: None}
+    }
+
+    pub fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
+        self.nodes.get(*node_h).unwrap()
     }
 }
 

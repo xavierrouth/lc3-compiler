@@ -4,6 +4,8 @@
         "./lex-parse/Cargo.toml",
         "./lex-parse/Cargo.toml",
         "./lex-parse/Cargo.toml",
-        "./lex-parse/Cargo.toml"
+        "./lex-parse/Cargo.toml",
+        "./codegen/Cargo.toml",
+        "./codegen/Cargo.toml"
     ]
 }

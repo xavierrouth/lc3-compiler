@@ -1,5 +1,7 @@
+#![deny(rust_2018_idioms)]
 use std::{path::PathBuf, fs::File, io::Read, cell::RefCell, rc::Rc};
 use clap::{Parser, error};
+use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, analysis::{Analyzer, self}, error::ErrorHandler};
 
 #[derive(Parser, Debug)]
@@ -47,7 +49,7 @@ fn main() {
     let ast = ast.unwrap();
 
     if cli.verbose {
-        let mut printer: ASTPrint = ASTPrint::new(false, &ast);
+        let mut printer: ASTPrint<'_> = ASTPrint::new(false, &ast);
         printer.traverse(&ast.root.unwrap());
     }
 
@@ -57,6 +59,16 @@ fn main() {
     analyzer.traverse(&ast.root.unwrap());
     analyzer.print_symbol_table();
 
+    let mut printer = codegen::asmprinter::AsmPrinter::new();
+    let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, analyzer.symbol_table);
+
+    codegen.emit_ast_node(&ast.root.unwrap());
+
+    let outfile = match cli.output {
+        Some(file) => file,
+        None => PathBuf::from(r"/out.asm")
+    };
+    printer.print_to_file(outfile);
 
     //println!("two: {:?}", cli.verbose);
 
