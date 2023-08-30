@@ -33,7 +33,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn get_line(&mut self, line: usize ) -> Option<InternedString> {
+    pub fn process_line(&mut self, line: usize ) -> Option<InternedString> {
         while self.error_handler.borrow_mut().lines.get(line).is_none(){ // If the line isn't in the buffer, loop until it is.
             if self.next() == EOF_CHAR {break;}
         }
@@ -282,7 +282,7 @@ mod lexer_tests {
 
         let mut error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler);
-        
+
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Plus);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Equals);
         assert_eq!(lexer.get_token().unwrap().kind, TokenKind::Minus);

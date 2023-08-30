@@ -145,6 +145,9 @@ pub enum TraversalOrder {
 
 pub trait Vistior<'a> {
     fn traverse(&mut self, node_h: &ASTNodeHandle) -> () {
+        if self.halt() {
+            return;
+        }
         let order: TraversalOrder = self.get_order();
 
         let node: ASTNode = self.get_node(node_h).clone();
@@ -249,6 +252,8 @@ pub trait Vistior<'a> {
     fn entry(&mut self, _node_h: &ASTNodeHandle) -> () {}
 
     fn exit(&mut self, _node_h: &ASTNodeHandle) -> () {}
+
+    fn halt(& self) -> bool {false}
 
 }
 

@@ -82,7 +82,7 @@ impl<'a> Parser<'a> {
             match kind {
                 TokenKind::Semicolon => {
                     let _token = self.prev_token();
-                    return Err(ParserError::MissingToken("Expected semicolon.".to_string(), Some(prev)))
+                    return Err(ParserError::MissingSemicolon("Expected semicolon.".to_string(), prev))
                 }
                 _ => {
                     let token = self.prev_token();
@@ -121,11 +121,13 @@ impl<'a> Parser<'a> {
 
         let mut ti = self.parse_declaration_specifiers()?;
 
-        let identifier:Option<InternedString> = self.parse_declarator(&mut ti, true);
+        let identifier: Option<InternedString> = self.parse_declarator(&mut ti, true);
         
         match identifier {
             None => {
-                return Err(ParserError::GeneralError("Expected declarator.".to_string(), Some(self.prev_token())))
+                let tok = self.peek_token();
+                self.lexer.process_line(tok.row);
+                return Err(ParserError::MissingDeclarator(tok))
             }
             Some(string) => {
                 if self.expect_token(TokenKind::OpenParen) {
@@ -268,9 +270,16 @@ impl<'a> Parser<'a> {
                 // Attempt variable declaration
                 let mut ti: TypeInfo = self.parse_declaration_specifiers()?;
                 if ti.type_specifier.marked_int || ti.type_specifier.marked_char {
-                    // TODO: Error maybe
-                    let identifier = self.parse_declarator(&mut ti, true).unwrap();
-                    self.parse_declaration(&mut ti, identifier) // JK this does eat semicolon
+                    match self.parse_declarator(&mut ti, true) {
+                        None => {
+                            let tok = self.peek_token();
+                            self.lexer.process_line(tok.row);
+                            return Err(ParserError::MissingDeclarator(tok))
+                        }
+                        Some(identifier) => {
+                            self.parse_declaration(&mut ti, identifier) // JK this does eat semicolon
+                        }
+                    }
                 }
                 else {
                     let stmt = self.parse_expression(0)?;

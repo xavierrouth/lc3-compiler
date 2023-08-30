@@ -118,11 +118,12 @@ pub struct Analyzer<'a> {
     symbol_table: SymbolTable, // 
     ast: &'a AST,
     error_handler: Rc<RefCell<ErrorHandler>>,
+    halt: bool,
 }
 
 impl <'a> Analyzer<'a> {
     pub fn new(ast: &'a AST, error_handler: Rc<RefCell<ErrorHandler>>,) -> Analyzer<'a> {
-        Analyzer { symbol_table: SymbolTable::new(), ast: ast, error_handler }
+        Analyzer { symbol_table: SymbolTable::new(), ast: ast, error_handler, halt: false}
     }
 
     fn enter_scope(&mut self, _next_param_slot: i32, _next_variable_slot: i32) -> () {
@@ -148,6 +149,7 @@ impl <'a> Analyzer<'a> {
 
     fn report_error(&mut self, error: AnalysisError) -> () {
         self.error_handler.borrow_mut().print_analysis_error(error);
+        self.halt = true;
     }
 
     
@@ -273,6 +275,10 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
 
     fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
         self.ast.nodes.get(*node_h).unwrap()
+    }
+
+    fn halt(&self) -> bool {
+        self.halt
     }
 
 }
