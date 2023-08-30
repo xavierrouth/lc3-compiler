@@ -33,13 +33,19 @@ impl<'a> Parser<'a> {
             lexer,
         }
     }
-    
-    /*
-    pub fn get_ast(&mut self) -> &'a AST<'a> {
-        &self.ast
-    } */
 
-    
+    pub fn parse(mut self) -> Option<AST> {
+        match self.parse_translation_unit() {
+            Ok(root) => {
+                self.ast.root = Some(root);
+                Some(self.ast)
+            }
+            Err(error) => {
+                self.error_handler.borrow_mut().print_parser_error(error);
+                None
+            }
+        }
+    }
 
     fn get_token(&mut self) -> Token {
         if !self.putback_stack.is_empty() {
@@ -99,7 +105,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_translation_unit(& mut self) -> Result<ASTNodeHandle, ParserError> {
+    fn parse_translation_unit(& mut self) -> Result<ASTNodeHandle, ParserError> {
         let mut body: Vec<ASTNodeHandle> = Vec::new();
         
         while self.peek_token().kind != TokenKind::EOF {
@@ -208,6 +214,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {
+        let variable_token = self.prev_token(); // This is so busted.
 
         if self.expect_token(TokenKind::Equals) {
             self.eat_token(TokenKind::Equals)?;
@@ -217,13 +224,19 @@ impl<'a> Parser<'a> {
             self.eat_token(TokenKind::Semicolon)?;
 
             let node = ASTNode::VariableDecl { identifier: identifier, initializer: Some(initializer), r#type: ti.clone() };
-            Ok(self.ast.nodes.insert(node))
+
+            let node_h = self.ast.nodes.insert(node);
+            self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
+            Ok(node_h)
+
         }
         else {
             self.eat_token(TokenKind::Semicolon)?; 
 
             let node = ASTNode::VariableDecl { identifier, initializer: None, r#type: ti.clone() };
-            Ok(self.ast.nodes.insert(node))
+            let node_h = self.ast.nodes.insert(node);
+            self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
+            Ok(node_h)
         }
     }
 
@@ -260,9 +273,9 @@ impl<'a> Parser<'a> {
                     self.parse_declaration(&mut ti, identifier) // JK this does eat semicolon
                 }
                 else {
-                    let stmt: Result<ASTNodeHandle, ParserError> = self.parse_expression(0);
+                    let stmt = self.parse_expression(0)?;
                     self.eat_token(TokenKind::Semicolon)?;
-                    stmt
+                    Ok(stmt)
                 }
             }
         }
@@ -477,9 +490,15 @@ impl<'a> Parser<'a> {
     fn parse_symbol_ref(&mut self) -> Result<ASTNodeHandle, ParserError> {
 
 
-        if let TokenKind::Identifier(identifier) = self.get_token().kind {
+        if let TokenKind::Identifier(identifier) = self.peek_token().kind {
+            let tok = self.get_token();
+            
             let node = ASTNode::SymbolRef {identifier: identifier};
-            Ok(self.ast.nodes.insert(node))
+            
+            // TOOD: Write helper function that takes node and token and does this for you:
+            let node_h = self.ast.nodes.insert(node);
+            self.error_handler.borrow_mut().tokens.insert(node_h, tok);
+            Ok(node_h)
         }
         else {
             return Err(ParserError::GeneralError("Expected symbol.".to_string(), Some(self.prev_token())))

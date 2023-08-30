@@ -38,24 +38,23 @@ fn main() {
     let mut lexer: lexer::Lexer<'_> = lexer::Lexer::new(&input_stream, error_handler.clone());
     let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer, error_handler.clone());
 
-    let root = parser.parse_translation_unit();
-    // Check errors here
-    if let Err(error) = root {
-        error_handler.borrow_mut().print_parser_error(error);
+    let ast = parser.parse();
+
+    if ast.is_none() {
         return;
     }
 
-    let root = root.unwrap();
+    let ast = ast.unwrap();
 
     if cli.verbose {
-        let mut printer: ASTPrint = ASTPrint::new(false, &parser.ast);
-        printer.traverse(&root);
+        let mut printer: ASTPrint = ASTPrint::new(false, &ast);
+        printer.traverse(&ast.root.unwrap());
     }
 
-    let mut analyzer: Analyzer<'_> = analysis::Analyzer::new(&parser.ast);
+    let mut analyzer: Analyzer<'_> = analysis::Analyzer::new(&ast, error_handler.clone());
     
     // Check for analysis errors
-    analyzer.traverse(&root);
+    analyzer.traverse(&ast.root.unwrap());
     analyzer.print_symbol_table();
 
 

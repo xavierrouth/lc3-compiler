@@ -5,17 +5,20 @@
 
 
 use core::fmt;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use slotmap::{SparseSecondaryMap};
 use crate::ast::{Vistior, AST, ASTNode, ASTNodeHandle, TraversalOrder};
+use crate::error::ErrorHandler;
 use crate::strings::InternedString;
 
 use crate::types::TypeInfo;
 
 #[derive(Debug)]
 pub enum AnalysisError {
-    AlreadyDeclared(InternedString),
-    UnknownSymbol(InternedString),
+    AlreadyDeclared(InternedString, ASTNodeHandle), // Used to extract line information. 
+    UnknownSymbol(InternedString, ASTNodeHandle),
 }
 
 pub struct STScope {
@@ -71,10 +74,10 @@ impl SymbolTable {
         st.stack.push(STScope::new());
         st
     }
-    pub fn search_scope(&mut self, identifier: &InternedString, _entry_type: &STEntryType) -> Option<STEntry> {
+    pub fn search_scope(&mut self, identifier: &InternedString, entry_type: &STEntryType) -> Option<STEntry> {
 
         for entry in self.stack.last().unwrap().var_entries.as_slice() {
-            if entry.identifier == *identifier {
+            if (entry.identifier == *identifier) && (*entry_type == entry.kind) {
                 return Some(entry.clone())
             }
         }
@@ -82,12 +85,15 @@ impl SymbolTable {
     } 
 
     pub fn search_up(&mut self, identifier: &InternedString, entry_type: &STEntryType) -> Option<STEntry> {
-
+        // TODO: Make entry types match.
         let entry = self.search_scope(&identifier, &entry_type);
 
         for scope in self.stack.iter().rev(){
             for entry in scope.var_entries.as_slice() {
-                return Some(entry.clone())
+                if (entry.identifier == *identifier) && (*entry_type == entry.kind) {
+                    return Some(entry.clone())
+                }
+                
             }
         }
         entry
@@ -95,7 +101,7 @@ impl SymbolTable {
 
     pub fn add(&mut self, node: ASTNodeHandle, entry: STEntry) -> Result<(), AnalysisError> {
         if self.search_scope(&entry.identifier, &entry.kind).is_some() {
-            Err(AnalysisError::AlreadyDeclared(entry.identifier))
+            Err(AnalysisError::AlreadyDeclared(entry.identifier, node))
         }
         else {
             self.stack.last_mut().unwrap().var_entries.push(entry.clone());
@@ -111,12 +117,12 @@ impl SymbolTable {
 pub struct Analyzer<'a> {
     symbol_table: SymbolTable, // 
     ast: &'a AST,
-    errors: Option<AnalysisError>,
+    error_handler: Rc<RefCell<ErrorHandler>>,
 }
 
 impl <'a> Analyzer<'a> {
-    pub fn new(ast: &'a AST) -> Analyzer<'a> {
-        Analyzer { symbol_table: SymbolTable::new(), ast: ast, errors: None }
+    pub fn new(ast: &'a AST, error_handler: Rc<RefCell<ErrorHandler>>,) -> Analyzer<'a> {
+        Analyzer { symbol_table: SymbolTable::new(), ast: ast, error_handler }
     }
 
     fn enter_scope(&mut self, _next_param_slot: i32, _next_variable_slot: i32) -> () {
@@ -141,12 +147,7 @@ impl <'a> Analyzer<'a> {
     }
 
     fn report_error(&mut self, error: AnalysisError) -> () {
-        if self.errors.is_some() {
-            ()
-        }
-        else {
-            self.errors = Some(error);
-        }
+        self.error_handler.borrow_mut().print_analysis_error(error);
     }
 
     
@@ -254,7 +255,7 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 // Make sure that it exists, and then map this node to the existing entry.
                 let entry = self.symbol_table.search_up(&identifier, &STEntryType::VarOrParam);
                 if entry.is_none() {
-                    let error = AnalysisError::UnknownSymbol(identifier);
+                    let error = AnalysisError::UnknownSymbol(identifier, *node_h);
                     self.report_error(error);
                 }
                 else {
