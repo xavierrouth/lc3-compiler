@@ -42,6 +42,12 @@ impl<'a> Codegen<'a> {
         Register { value: 10 } // TODO: error out here
     }
 
+    fn reset_regfile(&mut self) -> () {
+        for n in 0..7 {
+            self.regfile[n] = false;
+        }
+    }
+
     fn emit_condition_node(&mut self, node_h: &ASTNodeHandle) {
         let node = self.ast.get_node(node_h);
 
@@ -54,45 +60,59 @@ impl<'a> Codegen<'a> {
         let node = self.ast.get_node(node_h);
         match node {
             ASTNode::Program { declarations } => {
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ld(Self::R6, Label::Label("USER_STACK".to_string())), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R5, Self::R6, Imm::Int(-1)), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Jsr(Label::Label("main".to_string())), None));
+
+                self.printer.inst(LC3Bundle::Newline);
                 for decl in declarations {
                     self.emit_ast_node(decl);
                 }
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Halt, None));
+                //self.printer.data(LC3Bundle::Directive(Some(Label::Label("USER_STACK".to_string)), .LC3Directive::Fill(()), ()))
             }
             // Decls:
             ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
                 self.function = *identifier;
 
+                let function = self.resolve_string(self.function);
                 let identifier = self.resolve_string(*identifier);
 
+                if function == "main" {
+                    self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(identifier.clone()), None));
+                    self.emit_ast_node(body);
+                    return;
+                }
+                
                 self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(identifier.clone()), None));
                 // TODO: Support 'builder' syntax for these instructions. The entire first 20 chars really should not be necessary. 
                 self.printer.inst(LC3Bundle::SectionComment("callee setup:".to_string()));
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(-1)), Some("allocate spot for return value".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), Some("allocate spot for return value".to_string())));
 
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(-1)), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), None));
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(Self::R7, Self::R6, Imm::Int(0)), Some("push R7 (return address)".to_string())));
 
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(-1)), None));
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(Self::R7, Self::R6, Imm::Int(0)), Some("push R5 (caller frame pointer)".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(Self::R5, Self::R6, Imm::Int(0)), Some("push R5 (caller frame pointer)".to_string())));
 
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R5, Self::R6, Imm::Int(-1)), Some("set frame pointer".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R5, Self::R6, Imm::Int(-1)), Some("set frame pointer".to_string())));
 
                 self.printer.inst(LC3Bundle::Newline);
                 self.printer.inst(LC3Bundle::SectionComment("function body:".to_string()));
                 self.emit_ast_node(body);
 
-                
                 let teardown_label = format!("{identifier}.teardown").to_string();
 
                 self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(teardown_label), None));
 
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R5, Imm::Int(1)), Some("pop local variables".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R5, Imm::Int(1)), Some("pop local variables".to_string())));
 
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R5, Self::R6, Imm::Int(0)), Some("pop frame pointer".to_string())));
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(1)), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(Self::R5, Self::R6, Imm::Int(0)), Some("pop frame pointer".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(1)), None));
 
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R7, Self::R6, Imm::Int(0)), Some("pop return address".to_string())));
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(1)), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(Self::R7, Self::R6, Imm::Int(0)), Some("pop return address".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(1)), None));
 
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ret, None));
                 self.printer.inst(LC3Bundle::SectionComment("end function.".to_string()));
@@ -161,23 +181,36 @@ impl<'a> Codegen<'a> {
                 for stmt in statements {
                     self.emit_ast_node(stmt);
                     self.printer.inst(LC3Bundle::Newline);
+                    self.reset_regfile();
                 }
             },
             ASTNode::ExpressionStmt { expression } => todo!(),
             ASTNode::ReturnStmt { expression } => {
-                match expression {
-                    Some(expression) => {
-                        let reg = self.emit_expression_node(expression);
-                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(reg, Self::R5, Imm::Int(3)), Some("write return value, always R5 + 3".to_string())));
-                    },
-                    None =>  ()
-                }
-
                 let function = self.resolve_string(self.function);
-                let teardown_label = format!("{function}.teardown").to_string();
 
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Br(true, true, true, Label::Label(teardown_label)), None));
-
+                if function == "main" {
+                    match expression {
+                        Some(expression) => {
+                            let reg = self.emit_expression_node(expression);
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Sti(reg, Label::Label("RETURN_SLOT".to_string())), Some("write return value from main".to_string())));
+                        },
+                        None =>  ()
+                    }
+                }
+                else {
+                    match expression {
+                        Some(expression) => {
+                            let reg = self.emit_expression_node(expression);
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(reg, Self::R5, Imm::Int(3)), Some("write return value, always R5 + 3".to_string())));
+                        },
+                        None =>  ()
+                    }
+    
+                    let teardown_label = format!("{function}.teardown").to_string();
+    
+                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::Br(true, true, true, Label::Label(teardown_label)), None));
+                }   
+                
                 // Maybe we do "RETURN slot"
                     
             }

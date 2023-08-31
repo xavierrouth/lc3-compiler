@@ -7,5 +7,8 @@
         "./lex-parse/Cargo.toml",
         "./codegen/Cargo.toml",
         "./codegen/Cargo.toml"
-    ]
+    ],
+    "terminal.integrated.env.linux": {
+        "PATH" : "${env:PATH}:${workspaceFolder}/target/release"
+    },
 }

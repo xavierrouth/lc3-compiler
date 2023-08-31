@@ -6,16 +6,26 @@ use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, analysis::{Analyzer, se
 
 #[derive(Parser, Debug)]
 #[command(name = "LC3-Compiler")]
-#[command(about = "A C to LC3 Compiler built for students at the University of Illinois Urbana-Champaign by HKN (https://hkn-alpha.netlify.app).", long_about = None)]
+#[command(about = "A C to LC3 Compiler built for students at the University of Illinois, \nUrbana-Champaign by HKN (https://hkn-alpha.netlify.app).\nReport bugs to <xrouth2@illinois.edu>.", long_about = None)]
 #[command(author, version)] // Read from `Cargo.toml`
 struct Cli {
-    #[arg(short = 'o', long = "option", value_name = "FILE")]
+    #[arg(short = 'o', long = "output", value_name = "FILE")]
     output: Option<PathBuf>,
 
+    // Produce verbose output (print AST)
     #[arg(short = 'v', long = "verbose", default_value_t = false)]
     verbose: bool, 
+
+    // Disables most analysis errors (type checking)
+    #[arg(long = "sandbox", default_value_t = false)]
+    sandbox: bool,
+
+    // Output path
+    #[arg(short = 'S', long = "asm", default_value_t = false)]
+    asm: bool, 
     
-    #[arg(short, long, default_value_t = false)]
+    // Enable debugging information
+    #[arg(short = 'g', long = "debug", default_value_t = false)]
     debug: bool,
 
     #[arg(value_name = "INPUT_FILE")]
@@ -29,7 +39,12 @@ fn main() {
 
     let input_path: PathBuf  = cli.input;
 
-    let mut input_file = File::open(input_path).unwrap();
+    let mut input_file = File::open(input_path.clone());
+    if input_file.is_err() {
+        println!("Invalid input file. {:?}", input_path);
+        return;
+    }   
+    let mut input_file = input_file.unwrap();
 
     let mut input_stream = String::new();
 

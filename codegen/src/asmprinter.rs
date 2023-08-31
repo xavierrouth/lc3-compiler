@@ -31,17 +31,26 @@ impl AsmPrinter {
         writeln!(file, "; Disclaimer: Not all C features are supported by this compiler. Do not base ")?;
         writeln!(file, "; assumptions about valid C programming on what you see here.                ")?;
         writeln!(file, "; Please report any bugs or unexpected crashes to <xrouth2@illinois.edu>     ")?;
+        writeln!(file, "; To simulate output, use https://wchargin.com/lc3web/                       ")?;
         writeln!(file, "; ---------------------------------------------------------------------------")?;
+
+        writeln!(file, ".ORIG x3000")?;
 
         for inst in &self.instructions {
             writeln!(file, "{inst}")?;
         }
 
+        writeln!(file, "")?;
         writeln!(file, "; ------ Data Section ------ ")?;
 
         for datum in &self.data {
             writeln!(file, "{datum}")?;
         }
+
+        writeln!(file, "USER_STACK  .FILL xFDFF")?;
+        writeln!(file, "RETURN_SLOT .FILL xFDFF")?;
+
+        writeln!(file, ".END")?;
 
         Ok(())
     }

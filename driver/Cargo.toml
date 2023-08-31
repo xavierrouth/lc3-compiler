@@ -2,7 +2,7 @@
 name = "lc3-compile"
 version = "0.1.0"
 edition = "2021"
-authors = ["Xavier Routh - <xrouth2@illinois.edu>"]
+authors = ["Xavier Routh <xrouth2@illinois.edu>"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
