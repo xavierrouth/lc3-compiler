@@ -47,8 +47,8 @@ impl AsmPrinter {
             writeln!(file, "{datum}")?;
         }
 
-        writeln!(file, "USER_STACK  .FILL xFDFF")?;
-        writeln!(file, "RETURN_SLOT .FILL xFDFF")?;
+        writeln!(file, "USER_STACK        .FILL xFDFF")?;
+        writeln!(file, "RETURN_SLOT       .FILL xFDFF")?;
 
         writeln!(file, ".END")?;
 
@@ -131,9 +131,9 @@ impl fmt::Display for LC3Directive {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             // Can do allignment here.
-            LC3Directive::Fill(value) => write!(f, ".FILL {:>20}", value), // Need to pritn size in hex somehow
-            LC3Directive::Stringz(value) => write!(f, ".FILL \"{:>20}\"", value),
-            LC3Directive::Blkw(value) => write!(f, ".FILL {:>20}", value),
+            LC3Directive::Fill(value) => write!(f, ".FILL #{:0>4}", value), // Need to pritn size in hex somehow
+            LC3Directive::Stringz(value) => write!(f, ".FILL #\"{:0>4}\"", value),
+            LC3Directive::Blkw(value) => write!(f, ".FILL #{:0>4}", value),
             LC3Directive::Orig => write!(f, ".ORIG"),
             LC3Directive::End => write!(f, ".END"),
         }
@@ -167,10 +167,13 @@ impl fmt::Display for LC3Bundle {
                 }
             },
             LC3Bundle::Directive(label, directive, comment) => {
+                let directive = format!("{directive}");
                 match (label, comment) {
                     (None, None) => write!(f, "{directive}"),
                     (None, Some(comment)) => write!(f, "{directive} {:<50}{comment}", ";"),
-                    (Some(label), None) => write!(f, "{label} {directive}"),
+                    (Some(label), None) => {
+                        let label = format!("{label}");
+                        write!(f, "{:17} {directive}", label) },
                     (Some(label), Some(comment)) => write!(f, "{label} {directive} {:<50};{comment}", ";"),
                 }
             },

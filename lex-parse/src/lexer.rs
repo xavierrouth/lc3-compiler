@@ -1,7 +1,9 @@
 use core::{fmt};
 use std::{error, cell::RefCell, rc::Rc};
 
-use crate::{token::{Token, TokenKind}, strings::{InternedString, Strings}, error::{LexerError, ErrorHandler}};
+use colored::Colorize;
+
+use crate::{token::{Token, TokenKind, self}, strings::{InternedString, Strings}, error::{LexerError, ErrorHandler}};
 
 pub struct Lexer<'a> {
     index: usize,
@@ -42,12 +44,14 @@ impl<'a> Lexer<'a> {
 
     pub fn get_token(&mut self) -> Result<Token, ()> {
        
-        let mut ch: char = self.skip_until();
+        self.skip_until();
         
         let start_index = self.index;
 
         let row = self.row;
         let col = self.col;
+        let mut ch = self.next();
+
         // There must be a better way to do this.
         // Match Tokens:
         let kind: Result<TokenKind, LexerError> = match ch  {
@@ -81,8 +85,8 @@ impl<'a> Lexer<'a> {
             '/' => { ch = self.next(); 
                 match ch {
                 '=' => Ok(TokenKind::SlashEquals),
-                '/' => Ok(TokenKind::SlashSlash), // If these are our output, then do extra kjelkj before returning a token. 
-                '*' => Ok(TokenKind::SlashStar),
+                '/' => {self.skip_line(); return self.get_token()}, // If these are our output, then do extra kjelkj before returning a token. 
+                '*' => {self.skip_block_comment(); return self.get_token()}
                 _ => {self.putback(ch); Ok(TokenKind::Slash)}
             }},
             '-' => { ch = self.next(); 
@@ -170,12 +174,35 @@ impl<'a> Lexer<'a> {
 
         };
 
+
         let length: usize = self.index - start_index;
 
         let token: Token = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length, };
 
         Ok(token)
     }
+
+    fn skip_line(&mut self) -> () {
+        let mut ch: char = self.next();
+        while ch != EOF_CHAR && ch != '\n' {
+            ch = self.next();
+        }
+    }
+
+    fn skip_block_comment(&mut self) -> () {
+        loop {
+            let ch: char = self.next();
+            if ch == EOF_CHAR {
+                println!("{} Expected */ to end block comment.", "error:".red());
+            }
+            if ch == '*' {
+                if self.next() == '/' {
+                    return;
+                }
+            }
+            continue;
+        }
+    }   
 
     fn number(&mut self, mut ch: char) -> Result<i32, ()> {
         let _float_error: bool = false;
@@ -245,15 +272,16 @@ impl<'a> Lexer<'a> {
 
     fn putback(&mut self, ch: char) -> () {
         self.putback = ch;
+        self.index -= ch.len_utf8();
     }
 
-    fn skip_until(&mut self) -> char {
+    fn skip_until(&mut self) -> () {
         let mut ch: char = self.next();
 
         while ch.is_ascii_whitespace() {
             ch = self.next();
         }
-        ch
+        self.putback(ch);
     } 
 
     fn advance(&mut self) -> () {

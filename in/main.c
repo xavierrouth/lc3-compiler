@@ -1,13 +1,8 @@
-int accumulate() {
-    static int x = 4;
-    x = x + 1;
-    return x;
-}
-
+int a = 3 + 10 + 12312;
 int main() {
-    accumulate();
-    accumulate();
-    accumulate();
-    accumulate();
-    return accumulate();
-}
+    
+}   
+
+testawetatwe;
+
+// End

@@ -294,17 +294,17 @@ impl<'a> Codegen<'a> {
                                 return reg;
                             } 
                         }
-                        else {
-                            let left = self.emit_expression_node(left);
-                            self.regfile[left.value] = Self::USED;
-                            let right = self.emit_expression_node(right);
-                            
-                            self.printer.inst(LC3Bundle::Instruction(
-                                LC3Inst::AddReg(left, left, right), None));
-                            
-                            self.regfile[right.value] = Self::UNUSED;
-                            return left;
-                        }
+                        
+                        let left = self.emit_expression_node(left);
+                        self.regfile[left.value] = Self::USED;
+                        let right = self.emit_expression_node(right);
+                        
+                        self.printer.inst(LC3Bundle::Instruction(
+                            LC3Inst::AddReg(left, left, right), None));
+                        
+                        self.regfile[right.value] = Self::UNUSED;
+                        return left;
+                        
                     }
                     BinaryOpType::Sub => {
                         if let ASTNode::IntLiteral { value } = right_node {

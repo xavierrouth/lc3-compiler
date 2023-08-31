@@ -435,7 +435,7 @@ impl<'a> Parser<'a> {
                     self.ast.nodes.insert(node)
                 }
                 else {
-                    let token = self.prev_token();
+                    let token = self.peek_token();
                     return Err(ParserError::GeneralError("Expected expression.".to_string(), Some(token)))
                 }
             }

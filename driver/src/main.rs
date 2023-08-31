@@ -78,7 +78,9 @@ fn main() {
         return;
     }
 
-    analyzer.print_symbol_table();
+    if cli.verbose {
+        analyzer.print_symbol_table();
+    }
 
 
     let mut printer = codegen::asmprinter::AsmPrinter::new();
