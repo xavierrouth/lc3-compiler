@@ -1,6 +1,6 @@
 use lex_parse::{analysis::SymbolTable, ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType}};
 
-use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Inst, Immediate as Imm, Label};
+use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Inst, Immediate as Imm, Label, LC3Directive};
 use lex_parse::strings::{Strings, InternedString};
 
 pub struct Codegen<'a> {
@@ -27,6 +27,12 @@ impl<'a> Codegen<'a> {
         let function = lock.get_or_intern("main");
         Codegen { regfile: [false ; 8], global_data_addr: 0, user_stack_addr: 0, symbol_table: symbol_table, printer: printer, ast: ast, function: function  }
     }
+
+    pub fn resolve_string(&self, string: InternedString) -> String {
+        let lock = Strings.lock().unwrap();
+        lock.resolve(string).unwrap().to_string()
+    }
+
     fn get_empty_reg(&self) -> Register {
         for n in 0..7 {
             if self.regfile[n] == false {
@@ -56,18 +62,97 @@ impl<'a> Codegen<'a> {
             ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
                 self.function = *identifier;
 
-                let lock = Strings.lock().unwrap();
-                let identifier = lock.resolve(self.function).unwrap();
-                    
-                self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(identifier.to_string()), None));
-                //TODO: Add normal comment type.
-                //self.printer.inst(LC3Bundle::HeaderLabel(Label::Label("callee setup:".to_string()), None))
+                let identifier = self.resolve_string(*identifier);
+
+                self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(identifier.clone()), None));
+                // TODO: Support 'builder' syntax for these instructions. The entire first 20 chars really should not be necessary. 
+                self.printer.inst(LC3Bundle::SectionComment("callee setup:".to_string()));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(-1)), Some("allocate spot for return value".to_string())));
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(-1)), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(Self::R7, Self::R6, Imm::Int(0)), Some("push R7 (return address)".to_string())));
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(-1)), None));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(Self::R7, Self::R6, Imm::Int(0)), Some("push R5 (caller frame pointer)".to_string())));
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R5, Self::R6, Imm::Int(-1)), Some("set frame pointer".to_string())));
+
+                self.printer.inst(LC3Bundle::Newline);
+                self.printer.inst(LC3Bundle::SectionComment("function body:".to_string()));
                 self.emit_ast_node(body);
-                //self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(identifier.to_string()), None))
+
+                
+                let teardown_label = format!("{identifier}.teardown").to_string();
+
+                self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(teardown_label), None));
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R5, Imm::Int(1)), Some("pop local variables".to_string())));
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R5, Self::R6, Imm::Int(0)), Some("pop frame pointer".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(1)), None));
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R7, Self::R6, Imm::Int(0)), Some("pop return address".to_string())));
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AndImm(Self::R6, Self::R6, Imm::Int(1)), None));
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ret, None));
+                self.printer.inst(LC3Bundle::SectionComment("end function.".to_string()));
             },
-            ASTNode::ParameterDecl { identifier, r#type } => todo!(),
+            ASTNode::ParameterDecl { identifier, r#type } => {},
             ASTNode::VariableDecl { identifier, initializer, r#type } => {
 
+                let identifier = self.resolve_string(*identifier);
+                let function = self.resolve_string(self.function);
+
+                let entry = self.symbol_table.entries.get(*node_h).unwrap();
+                // Global Variable
+                if entry.is_global {
+                    let value = match initializer {
+                        Some(initializer) => {
+                            // Need to do constant evaluation.
+                            if let ASTNode::IntLiteral { value } = self.ast.get_node(initializer) {
+                                *value
+                            }
+                            else {0}
+                        }
+                        None => 0
+                    };
+                    
+
+                    self.printer.data(LC3Bundle::Directive(Some(Label::Label(identifier)), LC3Directive::Fill(value), None));
+                    return;
+                }
+                // Static Local Variable
+                else if entry.type_info.type_specifier.marked_static {
+                    let full_identifier = format!("{function}.{identifier}");   
+                    // TODO: Constant evaluation of expressions
+                    let value = match initializer {
+                        Some(initializer) => {
+                            // Need to do constant evaluation.
+                            if let ASTNode::IntLiteral { value } = self.ast.get_node(initializer) {
+                                *value
+                            }
+                            else {0}
+                        }
+                        None => 0
+                    };
+                    self.printer.data(LC3Bundle::Directive(Some(Label::Label(full_identifier)), LC3Directive::Fill(value), None));
+                }
+
+                // Nonstatic local variable
+                else {
+                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), Some(format!("allocate space for '{identifier}'"))));
+                    match initializer {
+                        Some(initializer) => {
+                            // Need to do constant evaluation.
+                            let reg = self.emit_expression_node(initializer);
+                            let entry = self.symbol_table.entries.get(*node_h).unwrap();
+                            self.regfile[reg.value] = Self::UNUSED;
+
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(reg, Self::R5, Imm::Int(entry.offset)), Some(format!("initialize '{identifier}'"))));
+                        }
+                        None => ()
+                    }
+                }
             },
             
             // Statements:
@@ -75,11 +160,27 @@ impl<'a> Codegen<'a> {
             ASTNode::CompoundStmt { statements, new_scope } => {
                 for stmt in statements {
                     self.emit_ast_node(stmt);
-                    // Emit newline
+                    self.printer.inst(LC3Bundle::Newline);
                 }
             },
             ASTNode::ExpressionStmt { expression } => todo!(),
-            ASTNode::ReturnStmt { expression } => todo!(),
+            ASTNode::ReturnStmt { expression } => {
+                match expression {
+                    Some(expression) => {
+                        let reg = self.emit_expression_node(expression);
+                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(reg, Self::R5, Imm::Int(3)), Some("write return value, always R5 + 3".to_string())));
+                    },
+                    None =>  ()
+                }
+
+                let function = self.resolve_string(self.function);
+                let teardown_label = format!("{function}.teardown").to_string();
+
+                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Br(true, true, true, Label::Label(teardown_label)), None));
+
+                // Maybe we do "RETURN slot"
+                    
+            }
             ASTNode::ForStmt { initializer, condition, update, body } => todo!(),
             ASTNode::WhileStmt { condition, body } => todo!(),
             ASTNode::IfStmt { condition, if_branch, else_branch } => todo!(),
@@ -98,7 +199,6 @@ impl<'a> Codegen<'a> {
 
     fn emit_expression_node(&mut self, node_h: &ASTNodeHandle) -> Register {
         
-
         let node = self.ast.get_node(node_h);
 
         match node {
@@ -124,17 +224,16 @@ impl<'a> Codegen<'a> {
                         }
                         else {
                             let entry = self.symbol_table.entries.get(*left).unwrap();
+                            
+                            let identifier = self.resolve_string(entry.identifier);
 
-                            let lock = Strings.lock().unwrap();
-                            let identifier = lock.resolve(entry.identifier).unwrap();
                             // Static   
                             if entry.type_info.type_specifier.marked_static {
                                 
-                                let function_name = lock.resolve(self.function).unwrap();
+                                let function = self.resolve_string(self.function);
                                 
-
                                 self.printer.inst(LC3Bundle::Instruction(
-                                    LC3Inst::St(reg, Label::Label(format!("{}.{}", function_name, identifier))), Some("assign to static variable".to_string())));
+                                    LC3Inst::St(reg, Label::Label(format!("{function}.{identifier}"))), Some("assign to static variable".to_string())));
                             } // Normal
                             else {
                                 self.printer.inst(LC3Bundle::Instruction(

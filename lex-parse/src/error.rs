@@ -9,11 +9,10 @@ use crate::{token::{Token}, strings::{InternedString, Strings}, ast::ASTNodeHand
 // This is debug info at this point.
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
-    FloatError(String),
     GeneralError(String, Option<Token>),
-    MissingSemicolon(String, Token),
+    MissingSemicolon(Token),
     MissingDeclarator(Token),
     UnknownError
 }
@@ -26,7 +25,7 @@ impl<'a> fmt::Display for ParserError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LexerError {
     FloatError(String),
     UnknownError
@@ -62,8 +61,8 @@ impl ErrorHandler {
 
     }
 
-    pub fn print_analysis_error(&self, error: AnalysisError) -> () {
-
+    pub fn print_analysis_error(&mut self, error: AnalysisError) -> () {
+        self.fatal = true;
         fn get_whitespace(count: usize) -> String {
             std::iter::repeat(' ').take(count).collect()
         }
@@ -112,12 +111,13 @@ impl ErrorHandler {
 
 
 
-    fn print_arrow(&mut self, line_num: usize, arrow_offset: usize) -> () {
+    fn print_arrow(&mut self, line_num: usize, arrow_offset: i32) -> () {
         let mut length: usize = "line  | ".len();
         let n = line_num + 1;
         length += successors(Some(n), |&n| (n >= 10).then(|| n / 10)).count(); // Number of spaces this int takes up.
+        let total_offset:i32 = length as i32 + arrow_offset;
 
-        println!("{}{}", Self::get_whitespace(length + arrow_offset), "^".green());
+        println!("{}{}", Self::get_whitespace(total_offset.try_into().unwrap()), "^".green());
     }
 
     fn print_line(&mut self, line_num: usize) -> () {
@@ -132,30 +132,29 @@ impl ErrorHandler {
     }
 
     pub fn print_parser_error(&mut self, error: ParserError) -> () {
+        self.fatal = true;
         
-
         match error {
-            ParserError::FloatError(msg) => println!( "{msg}"),
             // TODO: Make this a different error type if there is no token, instead of Option<Token>, wasted check.
             ParserError::MissingDeclarator(token) => {
                 println!("{} missing declarator", "error:".red());
                 self.print_line(token.row);
-                self.print_arrow(token.row, token.col - 2)
+                self.print_arrow(token.row, (token.col as i32 - 2).try_into().unwrap())
             },
             ParserError::GeneralError(msg, dbg_info) => {
                 if let Some(token) = dbg_info {
                     println!("{} {msg}", "error:".red());
                     self.print_line(token.row);
-                    self.print_arrow(token.row, token.col)
+                    self.print_arrow(token.row, token.col as i32 - 2)
                 }
                 else {
                     println!("{msg}");
                 }
             },
-            ParserError::MissingSemicolon(msg, token) => {
-                println!("{} {msg}", "error:".red());
+            ParserError::MissingSemicolon(token) => {
+                println!("{} expected semicolon", "error:".red());
                 self.print_line(token.row);
-                self.print_arrow(token.row, token.col + token.length - 2)
+                self.print_arrow(token.row, ((token.col + token.length) as i32 - 1).try_into().unwrap())
                 
 
             },

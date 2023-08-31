@@ -12,6 +12,7 @@ use crate::ast::{AST, ASTNodeHandle, ASTNode, UnaryOpType, BinaryOpType};
 
 use crate::lexer::{Lexer};
 use crate::token::{Token, TokenKind};
+use crate::types::DeclaratorPart;
 use crate::types::SpecifierInfo;
 use crate::types::TypeInfo;
 
@@ -41,6 +42,17 @@ impl<'a> Parser<'a> {
                 Some(self.ast)
             }
             Err(error) => {
+                match error.clone() {
+                    ParserError::GeneralError(string, token) =>  {
+                        if let Some(token) = token {
+                            self.lexer.process_line(token.row);
+                        }
+                    },
+                    ParserError::MissingSemicolon(token) => {self.lexer.process_line(token.row); ()},
+                    ParserError::MissingDeclarator(token) => {self.lexer.process_line(token.row); ()},
+                    ParserError::UnknownError => (),
+                };
+                
                 self.error_handler.borrow_mut().print_parser_error(error);
                 None
             }
@@ -75,18 +87,19 @@ impl<'a> Parser<'a> {
     }
 
     fn eat_token(& mut self, kind: TokenKind) -> Result<Token, ParserError> {
-        let prev = self.prev_token(); // Need to not update prev token on peek
-        let t = self.get_token();
+        let prev: Token = self.prev_token(); // Need to not update prev token on peek
+        let t: Token = self.get_token();
         if kind != t.kind {
             //todo
             match kind {
                 TokenKind::Semicolon => {
-                    let _token = self.prev_token();
-                    return Err(ParserError::MissingSemicolon("Expected semicolon.".to_string(), prev))
+                    return Err(ParserError::MissingSemicolon(prev))
+                }
+                TokenKind::Comma => {
+                    return Err(ParserError::GeneralError("Unexpected token.".to_string(), Some(t)))
                 }
                 _ => {
-                    let token = self.prev_token();
-                    return Err(ParserError::GeneralError("Unexpected token.".to_string(), Some(token)))
+                    return Err(ParserError::GeneralError("Unexpected token.".to_string(), Some(t)))
                 }
             }
         }
@@ -119,9 +132,9 @@ impl<'a> Parser<'a> {
     
     fn parse_toplevel_decl(&mut self) -> Result<ASTNodeHandle, ParserError> {
 
-        let mut ti = self.parse_declaration_specifiers()?;
+        let type_specifier = self.parse_declaration_specifiers()?;
 
-        let identifier: Option<InternedString> = self.parse_declarator(&mut ti, true);
+        let (declarator, identifier) = self.parse_declarator(false, true)?;
         
         match identifier {
             None => {
@@ -130,48 +143,98 @@ impl<'a> Parser<'a> {
                 return Err(ParserError::MissingDeclarator(tok))
             }
             Some(string) => {
+                let type_info = TypeInfo {
+                    declarator,
+                    type_specifier,
+                };
                 if self.expect_token(TokenKind::OpenParen) {
-                    self.parse_function_definition(ti, string)
+                    self.parse_function_definition(type_info, string)
                 }
                 else {
-                    self.parse_declaration(&mut ti, string)
+                    self.parse_declaration(type_info, string)
                 }
             }
         }
     }
 
     //TODO: Error handling here
-    fn parse_declaration_specifiers(&mut self) -> Result<TypeInfo, ParserError> {
-        let mut ti = TypeInfo{ declarator: Vec::new(), type_specifier: SpecifierInfo::default()};
-        while self.parse_declaration_specifier(& mut ti) {
+    fn parse_declaration_specifiers(&mut self) -> Result<SpecifierInfo, ParserError> {
+        let mut type_specifier = SpecifierInfo::default();
+        while self.parse_declaration_specifier(& mut type_specifier) {
             continue;
         }
-        Ok(ti)
+        Ok(type_specifier)
     }
 
-    fn parse_declaration_specifier(&mut self, type_info: &mut TypeInfo) -> bool {
+    fn parse_declaration_specifier(&mut self, type_specifier: &mut SpecifierInfo) -> bool {
         match self.peek_token().kind {
-            TokenKind::Int => type_info.type_specifier.marked_int = true,
-            TokenKind::Void => type_info.type_specifier.marked_void = true,
-            TokenKind::Char => type_info.type_specifier.marked_char = true,
-            TokenKind::Static => type_info.type_specifier.marked_static = true,
-            TokenKind::Const => type_info.type_specifier.marked_const = true,
+            TokenKind::Int => type_specifier.marked_int = true,
+            TokenKind::Void => type_specifier.marked_void = true,
+            TokenKind::Char => type_specifier.marked_char = true,
+            TokenKind::Static => type_specifier.marked_static = true,
+            TokenKind::Const => type_specifier.marked_const = true,
             _ => {return false;}
         }
         self.get_token();
         true
     }
 
+    fn parse_pointers(&mut self) -> Vec<DeclaratorPart> {
+        self.eat_token(TokenKind::Star);
+
+        let mut declarator: Vec<DeclaratorPart> = Vec::new();
+
+        declarator.push(DeclaratorPart::PointerDecl(None));
+
+        if self.expect_token(TokenKind::Star) {
+            let mut other = self.parse_pointers();
+            declarator.append(&mut other);
+        }
+
+        declarator
+    }
     // Adds a declarator to a TypeInfo
     // Add the token name to this thing
-    fn parse_declarator(&mut self, _ti: &mut TypeInfo, _check_pointer: bool) -> Option<InternedString> {
+    fn parse_declarator(&mut self, mut identifier_found: bool, check_pointers: bool) -> Result<(Vec<DeclaratorPart>, Option<InternedString>), ParserError> {
+        /* Convert declarator to direct declarator, by conditionally handling pointers*/
+        let mut right_decl: Vec<DeclaratorPart> = Vec::new();
+        let mut left_decl: Vec<DeclaratorPart> = Vec::new();
+
+        let mut identifier: Option<InternedString> = None;
+        
+        if check_pointers && self.expect_token(TokenKind::Star) {
+            right_decl = self.parse_pointers();
+        }
+
         if let TokenKind::Identifier(string) = self.peek_token().kind {
             self.get_token();
-            Some(string)
+            identifier_found = true;
+            identifier = Some(string);
         }
-        else {
-            None
+
+        else if self.expect_token(TokenKind::OpenParen) {
+            self.eat_token(TokenKind::OpenParen);
+            let (new_declarator, new_identifier) = self.parse_declarator(identifier_found, check_pointers)?;
+
+            if new_identifier.is_some()  {
+                if identifier_found == true {
+                    let tok = self.prev_token();
+                    self.lexer.process_line(tok.row);
+                    return Err(ParserError::GeneralError("unexepected identifier".to_string(), Some(tok)));
+                }
+                else {
+                    identifier = new_identifier;
+                    identifier_found = true;
+                }
+            }
+            left_decl = new_declarator;
+            self.eat_token(TokenKind::CloseParen);
         }
+
+        // Give up on arrays for now you loser!
+        left_decl.append(&mut right_decl);
+        Ok((left_decl, identifier))
+            
     }
 
     fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {    
@@ -180,12 +243,17 @@ impl<'a> Parser<'a> {
         let mut parameters: Vec<ASTNodeHandle> = Vec::new();
 
         while !self.expect_token(TokenKind::CloseParen) {
-            let mut param_type: TypeInfo = self.parse_declaration_specifiers()?;
+            let mut type_specifier: SpecifierInfo = self.parse_declaration_specifiers()?;
 
             // TODO: Check if there was actually a declaration specifier
-            if let Some(param_identifier) = self.parse_declarator(& mut param_type, true) {
+            if let (declarator, Some(param_id), ) = self.parse_declarator(false, true)? {
                 // else ERROR
-                let param = ASTNode::ParameterDecl { identifier: param_identifier, r#type: param_type };
+                let param_type = TypeInfo {
+                    declarator,
+                    type_specifier
+                };
+
+                let param = ASTNode::ParameterDecl { identifier: param_id, r#type: param_type };
                 let handle = self.ast.nodes.insert(param);
                 parameters.push(handle);
                 if !self.expect_token(TokenKind::Comma) {
@@ -196,7 +264,9 @@ impl<'a> Parser<'a> {
                 }
             }
             else {
-                return Err(ParserError::GeneralError("Expected a name for this variable.".to_string(), Some(self.prev_token())))            
+                let tok = self.prev_token();
+                self.lexer.process_line(tok.row);
+                return Err(ParserError::GeneralError("Expected a name for this variable.".to_string(), Some(tok)))            
             }
         }
 
@@ -215,7 +285,7 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn parse_declaration(&mut self, ti: &mut TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {
+    fn parse_declaration(&mut self, type_info: TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {
         let variable_token = self.prev_token(); // This is so busted.
 
         if self.expect_token(TokenKind::Equals) {
@@ -225,7 +295,7 @@ impl<'a> Parser<'a> {
 
             self.eat_token(TokenKind::Semicolon)?;
 
-            let node = ASTNode::VariableDecl { identifier: identifier, initializer: Some(initializer), r#type: ti.clone() };
+            let node = ASTNode::VariableDecl { identifier: identifier, initializer: Some(initializer), r#type: type_info };
 
             let node_h = self.ast.nodes.insert(node);
             self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
@@ -235,7 +305,7 @@ impl<'a> Parser<'a> {
         else {
             self.eat_token(TokenKind::Semicolon)?; 
 
-            let node = ASTNode::VariableDecl { identifier, initializer: None, r#type: ti.clone() };
+            let node = ASTNode::VariableDecl { identifier, initializer: None, r#type: type_info };
             let node_h = self.ast.nodes.insert(node);
             self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
             Ok(node_h)
@@ -267,17 +337,25 @@ impl<'a> Parser<'a> {
             TokenKind::While => self.parse_while_statement(),
             TokenKind::For => self.parse_for_statement(),
             _ => { // Thsee don't eat semicolons!
+
                 // Attempt variable declaration
-                let mut ti: TypeInfo = self.parse_declaration_specifiers()?;
-                if ti.type_specifier.marked_int || ti.type_specifier.marked_char {
-                    match self.parse_declarator(&mut ti, true) {
-                        None => {
+                // Parse type information
+                let type_specifier = self.parse_declaration_specifiers()?;
+
+                
+                if type_specifier.marked_int || type_specifier.marked_char {
+                    match self.parse_declarator(false, true)? {
+                        (declarator, None) => {
                             let tok = self.peek_token();
                             self.lexer.process_line(tok.row);
                             return Err(ParserError::MissingDeclarator(tok))
-                        }
-                        Some(identifier) => {
-                            self.parse_declaration(&mut ti, identifier) // JK this does eat semicolon
+                        },
+                        (declarator, Some(identifier)) => {
+                            let type_info = TypeInfo {
+                                declarator,
+                                type_specifier
+                            };
+                            self.parse_declaration(type_info, identifier)
                         }
                     }
                 }
@@ -292,12 +370,21 @@ impl<'a> Parser<'a> {
 
     fn parse_return_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         self.eat_token(TokenKind::Return)?;
-        let expression: ASTNodeHandle = self.parse_expression(0)?;
 
-        let stmt = ASTNode::ReturnStmt { expression };
-        let stmt = self.ast.nodes.insert(stmt);
-        self.eat_token(TokenKind::Semicolon)?;
-        Ok(stmt)
+        if self.expect_token(TokenKind::Semicolon) {
+            let stmt = ASTNode::ReturnStmt { expression: None };
+            let stmt = self.ast.nodes.insert(stmt);
+            self.eat_token(TokenKind::Semicolon)?;
+            Ok(stmt)
+        }
+        else {
+            let expression: ASTNodeHandle = self.parse_expression(0)?;
+            let stmt = ASTNode::ReturnStmt { expression: Some(expression) };
+            let stmt = self.ast.nodes.insert(stmt);
+            self.eat_token(TokenKind::Semicolon)?;
+            Ok(stmt)
+        }
+        
     }
 
     fn parse_if_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
@@ -376,7 +463,7 @@ impl<'a> Parser<'a> {
                 }
 
                 if token.kind == TokenKind::OpenParen {
-                    lhs = self.parse_function_call()?;
+                    lhs = self.parse_function_call(lhs)?;
                 }
                 // Handle function calls somewhere
                 else {
@@ -515,8 +602,33 @@ impl<'a> Parser<'a> {
         
     }
 
-    fn parse_function_call(&mut self) -> Result<ASTNodeHandle, ParserError> {
-        todo!()
+    fn parse_function_call(&mut self, symbol_ref: ASTNodeHandle) -> Result<ASTNodeHandle, ParserError> {
+        self.eat_token(TokenKind::OpenParen);
+        let mut arguments = Vec::new();
+
+  
+        loop {
+            // Expect Close Paren
+            if self.expect_token(TokenKind::CloseParen) {
+                break;
+            }
+
+            // Parse expression,
+            let arg = self.parse_expression(0)?;
+            arguments.push(arg);
+
+            if self.expect_token(TokenKind::CloseParen) {
+                break;
+            }
+
+            else {
+                self.eat_token(TokenKind::Comma)?;
+            }
+        }
+        
+        self.eat_token(TokenKind::CloseParen)?;
+        let node = ASTNode::FunctionCall { symbol_ref, arguments};
+        Ok(self.ast.nodes.insert(node))
     }
     
 }

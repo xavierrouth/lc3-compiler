@@ -35,6 +35,7 @@ fn main() {
 
     input_file.read_to_string(&mut input_stream).unwrap();
 
+    // "Global" error-handler
     let error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
 
     let mut lexer: lexer::Lexer<'_> = lexer::Lexer::new(&input_stream, error_handler.clone());
@@ -57,7 +58,13 @@ fn main() {
     
     // Check for analysis errors
     analyzer.traverse(&ast.root.unwrap());
+
+    if error_handler.borrow_mut().fatal {
+        return;
+    }
+
     analyzer.print_symbol_table();
+
 
     let mut printer = codegen::asmprinter::AsmPrinter::new();
     let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, analyzer.symbol_table);

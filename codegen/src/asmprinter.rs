@@ -7,6 +7,8 @@ pub struct AsmPrinter {
     data: Vec<LC3Bundle>,
 }   
 
+//TODO: Support 'builder' style api for these:
+
 impl AsmPrinter {
     pub fn new() -> AsmPrinter {
         AsmPrinter { instructions: Vec::new(), data: Vec::new() }
@@ -90,7 +92,7 @@ pub enum LC3Inst {
     AddImm(Register, Register, Immediate),
     AndReg(Register, Register, Register),
     AndImm(Register, Register, Immediate),
-    Br(bool, bool, bool),
+    Br(bool, bool, bool, Label),
     Jmp(Label),
     Jsr(Label),
     Jsrr(Register),
@@ -109,9 +111,9 @@ pub enum LC3Inst {
 }
 
 pub enum LC3Directive {
-    Fill(usize),
+    Fill(i32),
     Stringz(String),
-    Blkw(usize),
+    Blkw(i32),
     Orig,
     End
 }
@@ -132,7 +134,9 @@ impl fmt::Display for LC3Directive {
 pub enum LC3Bundle {
     HeaderLabel(Label, Option<String>), // String is comment
     Instruction(LC3Inst, Option<String>), // String is comment
-    Directive(Option<Label>, LC3Directive, Option<String>) // String is comment
+    Directive(Option<Label>, LC3Directive, Option<String>), // String is comment
+    SectionComment(String),
+    Newline,
 }
 
 impl fmt::Display for LC3Bundle {
@@ -146,18 +150,23 @@ impl fmt::Display for LC3Bundle {
             }
             LC3Bundle::Instruction(inst, comment) => {
                 match comment { // Note indentation here:
-                    Some(comment) => write!(f, "{}{inst}, {:>30} {comment}", "    ", ";"),
+                    Some(comment) => {
+                        let inst = format!("    {inst}");
+                        write!(f, "{:40}; {comment}", inst)
+                    },  
                     None => write!(f, "    {inst}"),
                 }
             },
             LC3Bundle::Directive(label, directive, comment) => {
                 match (label, comment) {
                     (None, None) => write!(f, "{directive}"),
-                    (None, Some(comment)) => write!(f, "{directive} {:>30} {comment}", ";"),
+                    (None, Some(comment)) => write!(f, "{directive} {:<50}{comment}", ";"),
                     (Some(label), None) => write!(f, "{label} {directive}"),
-                    (Some(label), Some(comment)) => write!(f, "{label} {directive} {:>30} {comment}", ";"),
+                    (Some(label), Some(comment)) => write!(f, "{label} {directive} {:<50};{comment}", ";"),
                 }
             },
+            LC3Bundle::SectionComment(comment) => write!(f, "; {comment}"),
+            LC3Bundle::Newline => {write!(f, "")},
         }
     }
 }
@@ -166,19 +175,19 @@ impl fmt::Display for LC3Inst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LC3Inst::Noop => write!(f, "\n"),
-            LC3Inst::AddReg(dest, src1, src2) => write!(f, "ADD {dest}, {src1}, {src2}"),
+            LC3Inst::AddReg(dest, src1, src2) =>  write!(f, "ADD {dest}, {src1}, {src2}"),
             LC3Inst::AddImm(dest, src1, src2) => write!(f, "ADD {dest}, {src1}, {src2}"),
-            LC3Inst::AndReg(dest, src1, src2) => write!(f, "AND {dest}, {src1}, {src2}"),
+            LC3Inst::AndReg(dest, src1, src2) =>  write!(f, "AND {dest}, {src1}, {src2}"),
             LC3Inst::AndImm(dest, src1, src2) => write!(f, "AND {dest}, {src1}, {src2}"),
-            LC3Inst::Br(n, z, p) => {
+            LC3Inst::Br(n, z, p, label) => {
                 match (n, z, p) {
-                    (true, true, true) => write!(f, "BR  "), // Same as BR
-                    (true, true, false) => write!(f, "BRnz"),
-                    (true, false, true) => write!(f, "BRnp"),
-                    (true, false, false) => write!(f, "BRn "),
-                    (false, true, true) => write!(f, "BRzp"),
-                    (false, true, false) => write!(f, "BRz "),
-                    (false, false, true) => write!(f, "BRp "),
+                    (true, true, true) => write!(f,   "BR   {label}"), // Same as BR
+                    (true, true, false) => write!(f,  "BRnz {label}"),
+                    (true, false, true) => write!(f,  "BRnp {label}"),
+                    (true, false, false) => write!(f, "BRn  {label}"),
+                    (false, true, true) => write!(f,  "BRzp {label}"),
+                    (false, true, false) => write!(f, "BRz  {label}"),
+                    (false, false, true) => write!(f, "BRp  {label}"),
                     (false, false, false) => write!(f, "; bad BR opcode"),
                 }
             }

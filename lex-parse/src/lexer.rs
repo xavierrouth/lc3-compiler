@@ -157,6 +157,8 @@ impl<'a> Lexer<'a> {
                     Some("break") => Ok(TokenKind::Break),
                     Some("int") => Ok(TokenKind::Int),
                     Some("return") => Ok(TokenKind::Return),
+                    Some("void") => Ok(TokenKind::Void),
+                    Some("static") => Ok(TokenKind::Static),
                     // TODO:
                     _  => Ok(TokenKind::Identifier(string))
                 }

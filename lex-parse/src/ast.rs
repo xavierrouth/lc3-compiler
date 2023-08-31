@@ -27,6 +27,7 @@ pub enum BinaryOpType {
     EqualEqual,
     Assign,
 }
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOpType {
     Increment,
@@ -115,7 +116,7 @@ pub enum ASTNode {
         expression: ASTNodeHandle,
     },
     ReturnStmt {
-        expression: ASTNodeHandle,
+        expression: Option<ASTNodeHandle>,
     },
     ForStmt {
         initializer: ASTNodeHandle,
@@ -187,7 +188,11 @@ pub trait Vistior<'a> {
                 }
             }
             ASTNode::ReturnStmt { expression } => {
-                self.traverse(&expression);
+                match expression {
+                    Some(expression) => self.traverse(&expression),
+                    None => (),
+                }
+                
             }
             ASTNode::CompoundStmt { statements, new_scope: _ } => {
                 for stmt in statements.iter() {

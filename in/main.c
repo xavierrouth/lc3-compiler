@@ -1,6 +1,13 @@
+int accumulate() {
+    static int x = 4;
+    x = x + 1;
+    return x;
+}
 
 int main() {
-    int a;
-    a = 3 + 7;
-    3 + 6;
+    accumulate();
+    accumulate();
+    accumulate();
+    accumulate();
+    return accumulate();
 }
