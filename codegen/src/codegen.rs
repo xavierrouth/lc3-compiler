@@ -117,8 +117,8 @@ impl<'a> Codegen<'a> {
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ret, None));
                 self.printer.inst(LC3Bundle::SectionComment("end function.".to_string()));
             },
-            ASTNode::ParameterDecl { identifier, r#type } => {},
-            ASTNode::VariableDecl { identifier, initializer, r#type } => {
+            ASTNode::ParameterDecl { identifier, type_info } => {},
+            ASTNode::VariableDecl { identifier, initializer, type_info } => {
 
                 let identifier = self.resolve_string(*identifier);
                 let function = self.resolve_string(self.function);
@@ -214,18 +214,24 @@ impl<'a> Codegen<'a> {
                 // Maybe we do "RETURN slot"
                     
             }
+
+            /**
             ASTNode::ForStmt { initializer, condition, update, body } => todo!(),
             ASTNode::WhileStmt { condition, body } => todo!(),
             ASTNode::IfStmt { condition, if_branch, else_branch } => todo!(),
             ASTNode::DeclStmt { declarations } => todo!(),
             ASTNode::InlineAsm { assembly } => todo!(),
+             */
 
             // Expressions:
             ASTNode::IntLiteral { value } => {self.emit_expression_node(node_h); ()},
             ASTNode::FunctionCall { symbol_ref, arguments } => {self.emit_expression_node(node_h); ()},
             ASTNode::SymbolRef { identifier } => {self.emit_expression_node(node_h); ()},
             ASTNode::BinaryOp { op, right, left } => {self.emit_expression_node(node_h); ()},
-            ASTNode::UnaryOp { op, child, order } => {self.emit_expression_node(node_h); ()},    
+            ASTNode::UnaryOp { op, child, order } => {self.emit_expression_node(node_h); ()},
+            _ => {
+                println!()
+            }    
         }
         
     }
@@ -343,6 +349,14 @@ impl<'a> Codegen<'a> {
                     BinaryOpType::GreaterThanEqual => todo!(),
                     BinaryOpType::NotEqual => todo!(),
                     BinaryOpType::EqualEqual => todo!(),
+
+                    // Pointer Access
+                    BinaryOpType::ArrayAccess => {
+                        
+                    }
+                    BinaryOpType::DotAccess => todo!(),
+                    BinaryOpType::PointerAccess => todo!(),
+                    
                 }
             },
             ASTNode::UnaryOp { op, child, order } => {
@@ -389,6 +403,11 @@ impl<'a> Codegen<'a> {
                 }
             },
             ASTNode::FunctionCall { symbol_ref, arguments } => {
+
+                // TODO:
+                // Push in-use regs
+
+
                 // Push arguments right to left.
                 for arg in arguments.into_iter().rev() {
                     let arg_reg = self.emit_expression_node(arg);
@@ -413,6 +432,8 @@ impl<'a> Codegen<'a> {
 
                 let num_args: i32 = arguments.len().try_into().unwrap();
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(num_args)), Some("pop arguments".to_string())));
+
+                // Restore regs
 
                 return ret;
             },

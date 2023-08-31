@@ -1,8 +1,11 @@
-int a = 3 + 10 + 12312;
+
+
 int main() {
-    
-}   
+    int a[10];
+    int b;
+    int c[10];
+    int d;
 
-testawetatwe;
+    d = b[5];
+}
 
-// End

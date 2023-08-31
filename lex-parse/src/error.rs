@@ -12,6 +12,7 @@ use crate::{token::{Token}, strings::{InternedString, Strings}, ast::ASTNodeHand
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
     GeneralError(String, Option<Token>),
+    ExpectedConstantInt(Token),
     MissingSemicolon(Token),
     MissingDeclarator(Token),
     UnknownError
@@ -155,8 +156,11 @@ impl ErrorHandler {
                 println!("{} expected semicolon", "error:".red());
                 self.print_line(token.row);
                 self.print_arrow(token.row, ((token.col + token.length) as i32 - 1).try_into().unwrap())
-                
-
+            },
+            ParserError::ExpectedConstantInt(token) => {
+                println!("{} complex expressions here are not enabled, please use a single int", "error:".red());
+                self.print_line(token.row);
+                self.print_arrow(token.row, (token.col as i32 - 2).try_into().unwrap())
             },
             ParserError::UnknownError => println!("Something went wrong"),
         }

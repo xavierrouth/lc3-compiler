@@ -11,11 +11,17 @@
     JSR main
 
 main
+    ADD R6, R6, #-1                     ; allocate space for 'a'
+
+    ADD R6, R6, #-1                     ; allocate space for 'b'
+
+    ADD R6, R6, #-1                     ; allocate space for 'c'
+
+    ADD R6, R6, #-1                     ; allocate space for 'd'
+
     HALT
 
 ; ------ Data Section ------ 
-a                 .FILL #0000
-testawetatwe      .FILL #0000
 USER_STACK        .FILL xFDFF
 RETURN_SLOT       .FILL xFDFF
 .END

@@ -82,7 +82,6 @@ fn main() {
         analyzer.print_symbol_table();
     }
 
-
     let mut printer = codegen::asmprinter::AsmPrinter::new();
     let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, analyzer.symbol_table);
 

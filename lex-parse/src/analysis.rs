@@ -190,21 +190,23 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     self.enter_scope(next_param_slot, next_variable_slot);
                 }
             },
-            ASTNode::VariableDecl { identifier, initializer: _, r#type } => {
+            ASTNode::VariableDecl { identifier, initializer: _, type_info } => {
                 // Make a new entry
                 
+                // Derive size from TypeInfo
                 let scope = self.curr_scope();
 
+                let size = type_info.calculate_size();
 
                 let entry = STEntry {
                     identifier: identifier,
-                    size: 1,
+                    size: size,
                     offset: scope.next_variable_slot * -1,
                     kind: STEntryType::VarOrParam,
-                    type_info: r#type,
+                    type_info: type_info,
                     is_global: scope.is_global,
                 };
-                scope.next_variable_slot += 1;
+                scope.next_variable_slot += size as i32;
 
                 // Need some way to error out here:
                 // How am i supposed to extract error from eresuklt?
@@ -213,17 +215,18 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     Ok(()) => ()
                 }
             },
-            ASTNode::ParameterDecl { identifier, r#type } => {
+            ASTNode::ParameterDecl { identifier, type_info } => {
                 // Make a new entry
                 
                 let scope = self.curr_scope();
 
+                // ASsert that size = 1
                 let entry = STEntry {
                     identifier: identifier,
                     size: 1,
                     offset: scope.next_param_slot + 4,
                     kind: STEntryType::VarOrParam,
-                    type_info: r#type,
+                    type_info: type_info,
                     is_global: false,
                 };
                 scope.next_param_slot += 1;

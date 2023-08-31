@@ -78,6 +78,8 @@ pub enum TokenKind {
     For,
     While,
     Break,
+    Else,
+    Do,
 
     Int,
     Void,

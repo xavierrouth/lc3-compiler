@@ -26,6 +26,10 @@ pub enum BinaryOpType {
     NotEqual,
     EqualEqual,
     Assign,
+
+    ArrayAccess,
+    DotAccess,
+    PointerAccess,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,12 +77,12 @@ pub enum ASTNode {
     },
     ParameterDecl {
         identifier: InternedString,
-        r#type: TypeInfo
+        type_info: TypeInfo
     },
     VariableDecl {
         identifier: InternedString,
         initializer: Option<ASTNodeHandle>,
-        r#type: TypeInfo
+        type_info: TypeInfo
     },
     // ==== Expressions: ====
     IntLiteral {
@@ -90,7 +94,7 @@ pub enum ASTNode {
     },
     SymbolRef {
         identifier: InternedString,
-        //r#type: TypeInfo<'a>,
+        //type_info: TypeInfo<'a>,
     },
     BinaryOp {
         op: BinaryOpType,
@@ -131,7 +135,7 @@ pub enum ASTNode {
     IfStmt {
         condition: ASTNodeHandle,
         if_branch: ASTNodeHandle,
-        else_branch: ASTNodeHandle,
+        else_branch: Option<ASTNodeHandle>,
     },
     DeclStmt {
         declarations: Vec<ASTNodeHandle>,
@@ -152,6 +156,7 @@ pub trait Vistior<'a> {
         if self.halt() {
             return;
         }
+
         let order: TraversalOrder = self.get_order();
 
         let node: ASTNode = self.get_node(node_h).clone();
@@ -182,7 +187,7 @@ pub trait Vistior<'a> {
                 }
                 self.traverse(&body);
             }
-            ASTNode::VariableDecl { identifier: _, initializer, r#type: _ } => {
+            ASTNode::VariableDecl { identifier: _, initializer, type_info: _ } => {
                 if initializer.is_some() {
                     self.traverse(initializer.as_ref().unwrap()); // Why doesn't this explicitly deref??
                 }
@@ -192,7 +197,6 @@ pub trait Vistior<'a> {
                     Some(expression) => self.traverse(&expression),
                     None => (),
                 }
-                
             }
             ASTNode::CompoundStmt { statements, new_scope: _ } => {
                 for stmt in statements.iter() {
@@ -202,7 +206,9 @@ pub trait Vistior<'a> {
             ASTNode::IfStmt { condition, if_branch, else_branch } => {
                 self.traverse(&condition);
                 self.traverse(&if_branch);
-                self.traverse(&else_branch);
+                if let Some(else_branch) = else_branch {
+                    self.traverse(&else_branch);
+                }
             }
             ASTNode::ForStmt { initializer, condition, update, body } => {
                 self.traverse(&initializer);
@@ -216,7 +222,7 @@ pub trait Vistior<'a> {
             }
             // Terminal Nodes
             ASTNode::InlineAsm { assembly: _ } => {}
-            ASTNode::ParameterDecl { identifier: _, r#type: _ } => {}
+            ASTNode::ParameterDecl { identifier: _, type_info: _ } => {}
             ASTNode::IntLiteral { value: _  } => {}
             ASTNode::SymbolRef { identifier: _} => {}
 
@@ -357,11 +363,11 @@ impl fmt::Display for ASTNode {
                 write!(f, "<FunctionDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
             },
             // TODO: Find some way to pritn type info
-            ASTNode::ParameterDecl { identifier, r#type: _ } => {
+            ASTNode::ParameterDecl { identifier, type_info: _ } => {
                 write!(f, "<ParameterDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
             }
-            ASTNode::VariableDecl { identifier, initializer: _, r#type: _ } => {
-                write!(f, "<VariableDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
+            ASTNode::VariableDecl { identifier, initializer: _, type_info: type_info } => {
+                write!(f, "<VariableDecl, {}, {type_info}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
             },
             ASTNode::IntLiteral { value } => {
                 write!(f, "<IntLiteral, {}>", value)

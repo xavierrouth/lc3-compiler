@@ -50,6 +50,7 @@ impl<'a> Parser<'a> {
                     },
                     ParserError::MissingSemicolon(token) => {self.lexer.process_line(token.row); ()},
                     ParserError::MissingDeclarator(token) => {self.lexer.process_line(token.row); ()},
+                    ParserError::ExpectedConstantInt(token) => {self.lexer.process_line(token.row); ()},
                     ParserError::UnknownError => (),
                 };
                 
@@ -213,7 +214,7 @@ impl<'a> Parser<'a> {
         }
 
         else if self.expect_token(TokenKind::OpenParen) {
-            self.eat_token(TokenKind::OpenParen);
+            self.eat_token(TokenKind::OpenParen)?;
             let (new_declarator, new_identifier) = self.parse_declarator(identifier_found, check_pointers)?;
 
             if new_identifier.is_some()  {
@@ -228,14 +229,37 @@ impl<'a> Parser<'a> {
                 }
             }
             left_decl = new_declarator;
-            self.eat_token(TokenKind::CloseParen);
+            self.eat_token(TokenKind::CloseParen)?;
         }
 
-        // Give up on arrays for now you loser!
+        // TODO: Function pointers
+
+        // Open bracket for arrays
+        while self.expect_token(TokenKind::OpenBracket) {
+            if identifier_found && self.expect_token(TokenKind::OpenBracket) {
+                self.eat_token(TokenKind::OpenBracket)?;
+                // Constant expressions:
+                // Validate that this is a constant expression self.parse_expression(binding_power) 
+                //let array_size = self.parse_int_literal()?;
+
+                // Evaluate it in parser for now
+                let array_size: usize = match self.get_token().kind {
+                    TokenKind::IntLiteral(value) => value.try_into().unwrap(),
+                    _ => {return Err(ParserError::ExpectedConstantInt(self.prev_token()));}
+                };
+
+                self.eat_token(TokenKind::CloseBracket)?;
+
+                left_decl.push(DeclaratorPart::ArrayDecl(array_size));
+                
+            }
+        }
+
         left_decl.append(&mut right_decl);
         Ok((left_decl, identifier))
             
     }
+
 
     fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {    
         self.eat_token(TokenKind::OpenParen)?;
@@ -253,7 +277,7 @@ impl<'a> Parser<'a> {
                     type_specifier
                 };
 
-                let param = ASTNode::ParameterDecl { identifier: param_id, r#type: param_type };
+                let param = ASTNode::ParameterDecl { identifier: param_id, type_info: param_type };
                 let handle = self.ast.nodes.insert(param);
                 parameters.push(handle);
                 if !self.expect_token(TokenKind::Comma) {
@@ -295,7 +319,7 @@ impl<'a> Parser<'a> {
 
             self.eat_token(TokenKind::Semicolon)?;
 
-            let node = ASTNode::VariableDecl { identifier: identifier, initializer: Some(initializer), r#type: type_info };
+            let node = ASTNode::VariableDecl { identifier: identifier, initializer: Some(initializer), type_info: type_info };
 
             let node_h = self.ast.nodes.insert(node);
             self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
@@ -305,7 +329,7 @@ impl<'a> Parser<'a> {
         else {
             self.eat_token(TokenKind::Semicolon)?; 
 
-            let node = ASTNode::VariableDecl { identifier, initializer: None, r#type: type_info };
+            let node = ASTNode::VariableDecl { identifier, initializer: None, type_info: type_info };
             let node_h = self.ast.nodes.insert(node);
             self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
             Ok(node_h)
@@ -388,14 +412,112 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
-        todo!()
+        self.eat_token(TokenKind::If)?;
+        self.eat_token(TokenKind::OpenParen)?;
+        let condition = self.parse_expression(0)?;
+        self.eat_token(TokenKind::CloseParen)?;
+        
+
+        // If part
+        let if_branch= if self.expect_token(TokenKind::OpenBrace) {
+            self.parse_compound_statement()?
+        }
+        else {
+            let tmp = self.parse_expression(0)?;
+            self.eat_token(TokenKind::Semicolon)?;
+            tmp
+        };
+
+        let else_branch = if self.expect_token(TokenKind::Else) {
+            self.eat_token(TokenKind::Else)?;
+
+            let else_stmt= if self.expect_token(TokenKind::OpenBrace) {
+                self.parse_compound_statement()?
+            }
+            else {
+                let tmp = self.parse_expression(0)?;
+                self.eat_token(TokenKind::Semicolon)?;
+                tmp
+            };
+            Some(else_stmt)
+
+        }
+        else {
+            None
+        };
+
+        let node = ASTNode::IfStmt { condition, if_branch, else_branch };
+        Ok(self.ast.nodes.insert(node))
+
     }
 
     fn parse_while_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
-        todo!()
+        self.eat_token(TokenKind::While)?;
+        self.eat_token(TokenKind::OpenParen)?;
+
+        let condition = self.parse_expression(0)?;
+
+        self.eat_token(TokenKind::CloseParen)?;
+        let body = self.parse_compound_statement()?;
+
+        let node = ASTNode::WhileStmt { condition, body};
+        Ok(self.ast.nodes.insert(node))
     }
 
     fn parse_for_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
+        self.eat_token(TokenKind::For)?;
+        self.eat_token(TokenKind::OpenParen)?;
+        // TODO: Only certain declaration specifiers are allowed
+        let initializer = self.parse_for_init_clause()?;
+
+        let condition = if self.expect_token(TokenKind::Semicolon) {
+            let node = ASTNode::IntLiteral { value: 1 };
+            Ok(self.ast.nodes.insert(node))
+        }
+        else {
+            self.parse_expression(0)
+        }?;
+
+        self.eat_token(TokenKind::Semicolon)?;
+
+        let update = self.parse_expression(0)?;
+
+        self.eat_token(TokenKind::CloseParen)?;
+
+        let body = self.parse_compound_statement()?;
+
+        let node = ASTNode::ForStmt { initializer, condition, update, body};
+        Ok(self.ast.nodes.insert(node))
+
+
+    }
+
+    fn parse_for_init_clause(&mut self) -> Result<ASTNodeHandle, ParserError> {
+        let specifier_info = self.parse_declaration_specifiers()?;
+        if specifier_info.marked_int {
+            let (declarator, identifier) = self.parse_declarator(false, true)?;
+
+            let identifier = if identifier.is_none() {
+                return Err(ParserError::MissingDeclarator(self.prev_token()));
+            } else {
+                identifier.unwrap()
+            };
+
+            let type_info = TypeInfo {
+                declarator,
+                type_specifier: specifier_info,
+            };
+            self.parse_declaration(type_info, identifier)
+        }
+        else {
+            let expr = self.parse_expression(0);
+            self.eat_token(TokenKind::Semicolon);
+            expr
+        }
+        
+    }
+
+    fn parse_struct(&mut self) -> Result<ASTNodeHandle, ParserError> {
         todo!()
     }
 
@@ -443,7 +565,7 @@ impl<'a> Parser<'a> {
 
         // Infix and postfix expressoins:
         loop {
-            if self.expect_token(TokenKind::Semicolon) || self.expect_token(TokenKind::CloseParen) {
+            if self.expect_token(TokenKind::Semicolon) || self.expect_token(TokenKind::CloseParen) || self.expect_token(TokenKind::CloseBracket) {
                 break;
             }
 
@@ -461,15 +583,22 @@ impl<'a> Parser<'a> {
                 if l_bp < binding_power {
                     break;
                 }
+                
 
                 if token.kind == TokenKind::OpenParen {
                     lhs = self.parse_function_call(lhs)?;
                 }
+                else if token.kind == TokenKind::OpenBracket {
+                    self.eat_token(TokenKind::OpenBracket)?;
+                    let rhs = self.parse_expression(0)?;
+                    self.eat_token(TokenKind::CloseBracket)?;
+                    let node = ASTNode::BinaryOp { op: BinaryOpType::ArrayAccess, right: rhs, left: lhs };
+                    lhs = self.ast.nodes.insert(node);
+                }
                 // Handle function calls somewhere
                 else {
-                    //self.get_token(); // What is this for?
+                    self.get_token(); 
                     let op: UnaryOpType = match token.kind {
-
                         TokenKind::PlusPlus => UnaryOpType::Increment, 
                         TokenKind::MinusMinus => UnaryOpType::Decrement, 
                         _ => {return Err(ParserError::UnknownError)}
@@ -502,6 +631,12 @@ impl<'a> Parser<'a> {
                     TokenKind::AndAnd => BinaryOpType::LogAnd,
                     TokenKind::BarBar => BinaryOpType::LogOr,
                     TokenKind::Equals => BinaryOpType::Assign,
+                    TokenKind::LessThan => BinaryOpType::LessThan,
+                    TokenKind::LessThanEqual => BinaryOpType::LessThanEqual,
+                    TokenKind::GreaterThan => BinaryOpType::GreaterThan,
+                    TokenKind::GreaterThanEqual => BinaryOpType::GreaterThanEqual,
+                    TokenKind::EqualsEquals => BinaryOpType::EqualEqual,
+                    TokenKind::ExclamationEquals => BinaryOpType::NotEqual,
                     _ => {return Err(ParserError::UnknownError)}
                 };
 
@@ -666,7 +801,7 @@ mod parser_tests {
         
         let gold: Vec<Discriminant<ASTNode>> = vec![
             discriminant(&ASTNode::Program { declarations: Vec::new()}),
-            discriminant(&ASTNode::VariableDecl { identifier: Strings.lock().unwrap().get_or_intern("hi") , initializer: None, r#type: TypeInfo::default() }),
+            discriminant(&ASTNode::VariableDecl { identifier: Strings.lock().unwrap().get_or_intern("hi") , initializer: None, type_info: TypeInfo::default() }),
         ];
 
         for i in 0..checker.results.len() {
@@ -699,7 +834,7 @@ mod parser_tests {
         /*
         let gold: Vec<Discriminant<ASTNode<'_>>> = vec![
             discriminant(&ASTNode::BinaryOp {left: Box::new(ASTNode:: {})}),
-            discriminant(&ASTNode::VariableDecl() { identifier: Token::default(), initializer: None, r#type: TypeInfo::default() }),
+            discriminant(&ASTNode::VariableDecl() { identifier: Token::default(), initializer: None, type_info: TypeInfo::default() }),
         ];
 
         for i in 0..checker.results.len() {

@@ -163,6 +163,11 @@ impl<'a> Lexer<'a> {
                     Some("return") => Ok(TokenKind::Return),
                     Some("void") => Ok(TokenKind::Void),
                     Some("static") => Ok(TokenKind::Static),
+                    Some("if") => Ok(TokenKind::If),
+                    Some("else") => Ok(TokenKind::Else),
+                    Some("for") => Ok(TokenKind::For),
+                    Some("while") => Ok(TokenKind::While),
+                    Some("do") => Ok(TokenKind::Do),
                     // TODO:
                     _  => Ok(TokenKind::Identifier(string))
                 }
