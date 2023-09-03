@@ -251,17 +251,8 @@ impl<'a> Codegen<'a> {
                         let reg = self.emit_expression_node(right);
                         self.regfile[reg.value] = Self::USED;
                         
-                        // Dereference:
-                        if let ASTNode::UnaryOp { op, child: child, order:_ } = left_node {
-                            if let UnaryOpType::Dereference = op {
-                                let addr = self.emit_expression_node(child);
-
-                                self.printer.inst(LC3Bundle::Instruction(
-                                    LC3Inst::Str(reg, addr, Imm::Int(0)), Some("dereference pointer".to_string())));
-                                    self.regfile[addr.value] = Self::UNUSED;
-                            }
-                        }
-                        else {
+                        // If the left is a simple symbol,
+                        if let ASTNode::SymbolRef { identifier } = left_node {
                             let entry = self.symbol_table.entries.get(*left).unwrap();
                             
                             let identifier = self.resolve_string(entry.identifier);
@@ -279,6 +270,20 @@ impl<'a> Codegen<'a> {
                                     LC3Inst::Str(reg, Self::R5, Imm::Int(entry.offset)), Some(format!("assign to variable {identifier}"))));
                             }
                         }
+                        else if let ASTNode::UnaryOp { op, child: child, order:_ } = left_node {
+                            if let UnaryOpType::Dereference = op {
+                                let addr = self.emit_expression_node(child);
+
+                                self.printer.inst(LC3Bundle::Instruction(
+                                    LC3Inst::Str(reg, addr, Imm::Int(0)), Some("dereference pointer".to_string())));
+                                    self.regfile[addr.value] = Self::UNUSED;
+                                
+                                return reg;
+                            }
+                        }
+                        
+                        // Anything else, treat left side as a memory address.
+                        let addr = self.emit_expression_node(left);
                         return reg;
                     }
                     BinaryOpType::Add => {
@@ -352,7 +357,21 @@ impl<'a> Codegen<'a> {
 
                     // Pointer Access
                     BinaryOpType::ArrayAccess => {
-                        
+                        let base = self.emit_expression_node(left);
+                        self.regfile[base.value] = Self::USED;
+                        let offset = self.emit_expression_node(right);
+                        self.regfile[offset.value] = Self::USED;
+
+                        let reg = self.get_empty_reg();
+                        // add offset to base, then load that
+                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddReg(reg, base, offset), Some("calculate index into array".to_string())));
+                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some("load element from array".to_string())));
+
+                        self.regfile[base.value] = Self::UNUSED;
+                        self.regfile[offset.value] = Self::UNUSED;
+                        self.regfile[reg.value] = Self::USED;
+                        return reg;
+
                     }
                     BinaryOpType::DotAccess => todo!(),
                     BinaryOpType::PointerAccess => todo!(),
@@ -385,6 +404,7 @@ impl<'a> Codegen<'a> {
                         return reg;
                     }
                     UnaryOpType::Dereference => {
+                        // Treat whatever is being dereferenced as a memory address, and just load from the address.
                         let reg = self.emit_expression_node(child);
                         self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), None));
                         return reg;
@@ -449,7 +469,11 @@ impl<'a> Codegen<'a> {
                 let entry = self.symbol_table.entries.get(*node_h).unwrap();
                 let reg = self.get_empty_reg();
 
-                if entry.type_info.type_specifier.marked_static {
+                // Not supporting static arrays for now.
+                if entry.type_info.is_array() {
+                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some("calculate base of array".to_string())));
+                }
+                else if entry.type_info.type_specifier.marked_static {
                     let lock = Strings.lock().unwrap();
                     let identifier = lock.resolve(entry.identifier).unwrap();
                     let function_name = lock.resolve(self.function).unwrap();

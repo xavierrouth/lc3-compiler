@@ -4,7 +4,7 @@ use std::{error, iter::successors};
 use colored::Colorize;
 use slotmap::SecondaryMap;
 
-use crate::{token::{Token}, strings::{InternedString, Strings}, ast::ASTNodeHandle, analysis::AnalysisError};
+use crate::{token::{Token}, context::{InternedString, Context}, ast::ASTNodeHandle};
 
 // This is debug info at this point.
 
@@ -16,6 +16,13 @@ pub enum ParserError {
     MissingSemicolon(Token),
     MissingDeclarator(Token),
     UnknownError
+}
+
+#[derive(Debug)]
+pub enum AnalysisError {
+    AlreadyDeclared(InternedString, ASTNodeHandle), // Used to extract line information. 
+    UnknownSymbol(InternedString, ASTNodeHandle),
+    General(ASTNodeHandle),
 }
 
 impl<'a> error::Error for ParserError {}
@@ -43,18 +50,19 @@ impl fmt::Display for LexerError {
     }
 }
 
-pub struct ErrorHandler {
+
+pub struct ErrorHandler<'ctx> {
     pub tokens: SecondaryMap<ASTNodeHandle, Token>,  
-    pub lines: Vec<InternedString>,
     pub fatal: bool,
+    context: &'ctx Context<'ctx>
 }
 
-impl ErrorHandler {
-    pub fn new() -> ErrorHandler {
+impl <'ctx> ErrorHandler<'ctx> {
+    pub fn new(context: &'ctx Context<'ctx>) -> ErrorHandler<'ctx> {
         ErrorHandler {
             tokens: SecondaryMap::new(),
-            lines: Vec::new(),
             fatal: false,
+            context,
         }
     }
 
@@ -72,12 +80,9 @@ impl ErrorHandler {
             // TODO: Report previous declaration. No, I don't want to.
             AnalysisError::AlreadyDeclared(identifier, node_h) => {
                 let token = self.tokens.get(node_h).unwrap();
-                let line = self.lines.get(token.row).unwrap();
 
-
-                let lock = Strings.lock().unwrap();
-                let line = lock.resolve(*line).unwrap();
-                let identifier = lock.resolve(identifier).unwrap();
+                let line = self.context.get_line(token.row);
+                let identifier = self.context.resolve_string(identifier);
 
                 println!("{} redeclaration of '{}'", "error:".red(), identifier);
                 print!("line {} | {} ", token.row + 1, line);
@@ -91,12 +96,9 @@ impl ErrorHandler {
             }
             AnalysisError::UnknownSymbol(identifier, node_h) => {
                 let token = self.tokens.get(node_h).unwrap();
-                let line = self.lines.get(token.row).unwrap();
 
-
-                let lock = Strings.lock().unwrap();
-                let line = lock.resolve(*line).unwrap();
-                let identifier = lock.resolve(identifier).unwrap();
+                let line = self.context.get_line(token.row);
+                let identifier = self.context.resolve_string(identifier);
 
                 println!("{} unknown identifier: '{}'", "error:".red(), identifier);
                 print!("line {} | {} ", token.row + 1, line);
@@ -107,12 +109,13 @@ impl ErrorHandler {
 
                 println!("{}{}", get_whitespace(length + token.col - 2), "^".green());
             },
+            AnalysisError::General(_) => todo!(),
         }
     }
 
 
 
-    fn print_arrow(&mut self, line_num: usize, arrow_offset: i32) -> () {
+    fn print_arrow(& self, line_num: usize, arrow_offset: i32) -> () {
         let mut length: usize = "line  | ".len();
         let n = line_num + 1;
         length += successors(Some(n), |&n| (n >= 10).then(|| n / 10)).count(); // Number of spaces this int takes up.
@@ -121,10 +124,9 @@ impl ErrorHandler {
         println!("{}{}", Self::get_whitespace(total_offset.try_into().unwrap()), "^".green());
     }
 
-    fn print_line(&mut self, line_num: usize) -> () {
-        let line = self.lines.get(line_num).unwrap();
-        let lock = Strings.lock().unwrap();
-        let line = lock.resolve(*line).unwrap();
+    fn print_line(& self, line_num: usize) -> () {
+
+        let line = self.context.get_line(line_num);
         print!("line {} | {} ", line_num + 1, line);
     }
 
@@ -132,8 +134,7 @@ impl ErrorHandler {
         std::iter::repeat(' ').take(count).collect()
     }
 
-    pub fn print_parser_error(&mut self, error: ParserError) -> () {
-        self.fatal = true;
+    pub fn print_parser_error(&self, error: ParserError) -> () {
         
         match error {
             // TODO: Make this a different error type if there is no token, instead of Option<Token>, wasted check.

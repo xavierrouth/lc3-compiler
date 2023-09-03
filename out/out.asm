@@ -13,11 +13,22 @@
 main
     ADD R6, R6, #-1                     ; allocate space for 'a'
 
+    AND R0, R0, #0
+    ADD R0, R0, #9
+    ADD R1, R5, #0                      ; calculate base of array
+    ADD R1, R1, #4
+    STR R0, R1, #0                      ; dereference pointer
+
     ADD R6, R6, #-1                     ; allocate space for 'b'
+    ADD R0, R5, #0                      ; calculate base of array
+    AND R1, R1, #0
+    ADD R1, R1, #4
+    ADD R2, R0, R1                      ; calculate index into array
+    LDR R2, R2, #0                      ; load element from array
+    STR R2, R5, #-10                    ; initialize 'b'
 
-    ADD R6, R6, #-1                     ; allocate space for 'c'
-
-    ADD R6, R6, #-1                     ; allocate space for 'd'
+    LDR R0, R5, #-10                    ; load local variable or parameter
+    STI R0, RETURN_SLOT                 ; write return value from main
 
     HALT
 

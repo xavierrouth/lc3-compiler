@@ -1,5 +1,5 @@
 [package]
-name = "codegen"
+name = "analysis"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,4 +8,8 @@ edition = "2021"
 
 [dependencies]
 lex-parse = { path = "../lex-parse" }
-analysis = { path = "../analysis" }
+colored = "2"
+slotmap = "1.0"
+string-interner = "0.14"
+lazy_static = "1.4.0"
+

@@ -1,50 +1,104 @@
 use core::fmt;
+use std::{hash::Hash, default};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SpecifierInfo {
-    pub marked_const: bool,
-    pub marked_volatile: bool,
-    pub marked_static: bool,
-    pub marked_int: bool,
-    pub marked_char: bool,
-    pub marked_void: bool
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Qualifiers {
+    pub cv: Option<CVQual>, // CV / Type Qualifiers
+    pub storage: StorageQual, // Storage Class
 }
 
-impl Default for SpecifierInfo {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CVQual {
+    Const,
+    Volatile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StorageQual {
+    Static,
+    Auto,
+    Register,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]  
+pub enum CType {
+    #[default]
+    Int,
+    Char,
+    Void
+}
+
+impl Default for Qualifiers {
     fn default() -> Self {
-        SpecifierInfo { marked_const: false, marked_volatile: false, marked_static: false, marked_int: false, marked_char: false, marked_void: false }
+        Qualifiers { cv: None, storage: StorageQual::Auto}
     }
 }
 
-impl fmt::Display for SpecifierInfo {
+impl fmt::Display for Qualifiers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tmp: String = String::new();
-        if self.marked_const {
-            tmp.push_str("const");
+        
+        match self.cv {
+            Some(CVQual::Const) => tmp.push_str("const "),
+            Some(CVQual::Volatile) => tmp.push_str("volatile "),
+            None => (),
         }
-        if self.marked_volatile {
-            tmp.push_str("volatile");
+        match self.storage {
+            StorageQual::Static => tmp.push_str("static"),
+            StorageQual::Auto => tmp.push_str(""), //auto "), // Maybe dno't print anything here.
+            StorageQual::Register => tmp.push_str("register"),
         }
-        if self.marked_static {
-            tmp.push_str("static");
-        }
-        if self.marked_int{
-            tmp.push_str("int");
-        }
-        if self.marked_char {
-            tmp.push_str("char");
-        }
-        if self.marked_void {
-            tmp.push_str("void");
-        }
+
         write!(f, "{tmp}")
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl fmt::Display for CType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CType::Int => write!(f, "int"),
+            CType::Char => write!(f, "char"),
+            CType::Void => write!(f, "void"),
+        }
+    }
+}
+
+
+impl fmt::Display for TypeSpecifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.ctype {
+            Some(ctype) =>  write!(f, "{} {}", self.qualifiers, ctype),
+            None => write!(f, "{}", self.qualifiers),
+        }
+       
+    }
+}
+// Weird hackiness going on here:
+#[derive(Debug, Clone, Default)]
+pub struct TypeSpecifier {
+    pub qualifiers: Qualifiers,
+    pub ctype: Option<CType>,
+}
+
+impl Hash for TypeSpecifier {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.qualifiers.hash(state); //DONT HASH QUALIFIERS
+        self.ctype.hash(state);
+    }
+}
+
+impl Eq for TypeSpecifier {}
+
+impl PartialEq for TypeSpecifier {
+    fn eq(&self, other: &Self) -> bool {
+        self.ctype == other.ctype
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeclaratorPart {
-    FunctionDecl(SpecifierInfo),
-    PointerDecl(Option<SpecifierInfo>),
+    FunctionDecl(CType),
+    PointerDecl(Option<CType>),
     ArrayDecl(usize),
 }
 
@@ -58,13 +112,28 @@ impl DeclaratorPart {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypeInfo {
+ 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct Type {
     pub declarator: Vec<DeclaratorPart>,
-    pub type_specifier: SpecifierInfo,
+    pub specifier: TypeSpecifier,
+    
 }
 
-impl TypeInfo {
+pub struct TypeWithQuals {
+    pub qualifiers: Qualifiers,
+    
+}
+
+
+impl Type {
+    pub fn new() -> Type {
+        Type {
+            declarator: Vec::new(),
+            specifier: TypeSpecifier::default(),
+        }
+    }
+
     pub fn calculate_size(&self) -> usize {
         // Don't do bytes vs other stuff for now
         match self.declarator.first() {
@@ -72,9 +141,18 @@ impl TypeInfo {
             None => 1
         }
     }
+
+    pub fn is_array(&self) -> bool {
+        match self.declarator.first() {
+            Some(DeclaratorPart::ArrayDecl(_)) => true,
+            _ => false
+        }
+    }
 }
 
-impl fmt::Display for TypeInfo {
+
+
+impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         
         fn print_declarator(declarator: &mut Vec<DeclaratorPart>, prev_fnc_or_array: bool) -> String {
@@ -108,19 +186,11 @@ impl fmt::Display for TypeInfo {
         }
         let string = print_declarator(& mut self.declarator.clone(), false);
 
-        write!(f, "{:} {string}", self.type_specifier)
+        write!(f, "{:} {string}", self.specifier)
     }
     
 }
 
-impl Default for TypeInfo {
-    fn default() -> Self {
-        TypeInfo {
-            declarator: Vec::new(),
-            type_specifier: SpecifierInfo::default(),
-        }
-    }
-}
 
 
 

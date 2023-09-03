@@ -1,3 +1,5 @@
+
+/*
 #[allow(non_upper_case_globals)]
 
 use std::{sync::Mutex};
@@ -10,3 +12,5 @@ pub type InternedString = SymbolU16;
 lazy_static! {
     pub static ref Strings: Mutex<StringInterner<StringBackend<SymbolU16>>> = Mutex::new(StringInterner::new());
 }
+
+ */

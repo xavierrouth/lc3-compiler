@@ -1,8 +1,9 @@
 #![deny(rust_2018_idioms)]
 use std::{path::PathBuf, fs::File, io::Read, cell::RefCell, rc::Rc};
+use analysis::analysis::Analyzer;
 use clap::{Parser, error};
-use codegen::asmprinter::AsmPrinter;
-use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, analysis::{Analyzer, self}, error::ErrorHandler};
+//use codegen::asmprinter::AsmPrinter;
+use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
 
 #[derive(Parser, Debug)]
 #[command(name = "LC3-Compiler")]
@@ -39,36 +40,34 @@ fn main() {
 
     let input_path: PathBuf  = cli.input;
 
-    let mut input_file = File::open(input_path.clone());
-    if input_file.is_err() {
-        println!("Invalid input file. {:?}", input_path);
-        return;
-    }   
-    let mut input_file = input_file.unwrap();
+    let mut input_file = match File::open(input_path.clone()) {
+        Ok(input_file) => input_file,
+        Err(_) => {println!("Invalid input file. {:?}", input_path); return},
+    };
 
     let mut input_stream = String::new();
 
     input_file.read_to_string(&mut input_stream).unwrap();
 
-    // "Global" error-handler
-    let error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+    let mut context = Context::new(&input_stream);
 
-    let mut lexer: lexer::Lexer<'_> = lexer::Lexer::new(&input_stream, error_handler.clone());
-    let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer, error_handler.clone());
+    let mut lexer: lexer::Lexer<'_, '_> = lexer::Lexer::new(&input_stream, &context);
+    let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer, &context);
 
     let ast = parser.parse();
 
-    if ast.is_none() {
+    if ast.is_err() {
         return;
     }
 
     let ast = ast.unwrap();
 
     if cli.verbose {
-        let mut printer: ASTPrint<'_> = ASTPrint::new(false, &ast);
+        let mut printer: ASTPrint<'_> = ASTPrint::new(false, &ast, &context);
         printer.traverse(&ast.root.unwrap());
     }
 
+    /*
     let mut analyzer: Analyzer<'_> = analysis::Analyzer::new(&ast, error_handler.clone());
     
     // Check for analysis errors
@@ -80,7 +79,9 @@ fn main() {
 
     if cli.verbose {
         analyzer.print_symbol_table();
-    }
+    } */
+
+    /*
 
     let mut printer = codegen::asmprinter::AsmPrinter::new();
     let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, analyzer.symbol_table);
@@ -93,6 +94,6 @@ fn main() {
     };
     printer.print_to_file(outfile);
 
-    //println!("two: {:?}", cli.verbose);
+    //println!("two: {:?}", cli.verbose);  */
 
 }

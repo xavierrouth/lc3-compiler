@@ -10,6 +10,6 @@ authors = ["Xavier Routh <xrouth2@illinois.edu>"]
 [dependencies]
 clap = { version = "4.3.23", features = ["derive"] }
 string-interner = "0.14"
-codegen = { path = "../codegen" }
+# codegen = { path = "../codegen" }
 lex-parse = { path = "../lex-parse" }
-# analysis = { path = "../analysis" }
+analysis = { path = "../analysis" }

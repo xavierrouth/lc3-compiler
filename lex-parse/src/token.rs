@@ -1,4 +1,4 @@
-use crate::strings::InternedString;
+use crate::context::InternedString;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {

@@ -1,11 +1,10 @@
-
-
 int main() {
     int a[10];
-    int b;
-    int c[10];
-    int d;
-
-    d = b[5];
+    int b = a[4];
+    int (*a)[10];
+    int *a[10];
+    return b;
 }
+
+int decl = 4;
 

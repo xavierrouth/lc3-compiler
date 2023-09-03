@@ -5,58 +5,44 @@ use std::rc::Rc;
 
 use crate::error::{ErrorHandler, ParserError};
 
-use crate::strings::Strings;
-use crate::strings::{InternedString};
+use crate::context::{InternedString, InternedType, TypeInterner, Context};
 
 use crate::ast::{AST, ASTNodeHandle, ASTNode, UnaryOpType, BinaryOpType};
 
 use crate::lexer::{Lexer};
 use crate::token::{Token, TokenKind};
-use crate::types::DeclaratorPart;
-use crate::types::SpecifierInfo;
-use crate::types::TypeInfo;
+
+use crate::types::CType;
+use crate::types::CVQual;
+use crate::types::StorageQual;
+use crate::types::{TypeSpecifier, DeclaratorPart, Type};
 
 pub struct Parser<'a> {
     pub ast: AST,
-    lexer: &'a mut Lexer<'a>,
-    error_handler: Rc<RefCell<ErrorHandler>>,
+    lexer: &'a mut Lexer<'a, 'a>,
     putback_stack: Vec<Token>, 
     token: Token, // The last token that was returend
+    context: &'a Context<'a> //TODO: Merge error handler and context.
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(lexer: &'a mut Lexer<'a>, error_handler: Rc<RefCell<ErrorHandler>>) -> Parser<'a> {
+    pub fn new(lexer: &'a mut Lexer<'a, 'a>, context: &'a Context<'a>) -> Parser<'a> {
         Parser {
             putback_stack: Vec::new(),
             token: Token::default(),
             ast: AST::new(),
-            error_handler,
             lexer,
+            context,
         }
     }
 
-    pub fn parse(mut self) -> Option<AST> {
+    pub fn parse(mut self) -> Result<AST, ParserError> {
         match self.parse_translation_unit() {
             Ok(root) => {
                 self.ast.root = Some(root);
-                Some(self.ast)
+                Ok(self.ast)
             }
-            Err(error) => {
-                match error.clone() {
-                    ParserError::GeneralError(string, token) =>  {
-                        if let Some(token) = token {
-                            self.lexer.process_line(token.row);
-                        }
-                    },
-                    ParserError::MissingSemicolon(token) => {self.lexer.process_line(token.row); ()},
-                    ParserError::MissingDeclarator(token) => {self.lexer.process_line(token.row); ()},
-                    ParserError::ExpectedConstantInt(token) => {self.lexer.process_line(token.row); ()},
-                    ParserError::UnknownError => (),
-                };
-                
-                self.error_handler.borrow_mut().print_parser_error(error);
-                None
-            }
+            Err(error) => Err(error)
         }
     }
 
@@ -133,21 +119,20 @@ impl<'a> Parser<'a> {
     
     fn parse_toplevel_decl(&mut self) -> Result<ASTNodeHandle, ParserError> {
 
-        let type_specifier = self.parse_declaration_specifiers()?;
+        let specifier = self.parse_declaration_specifiers()?;
 
         let (declarator, identifier) = self.parse_declarator(false, true)?;
         
         match identifier {
             None => {
                 let tok = self.peek_token();
-                self.lexer.process_line(tok.row);
                 return Err(ParserError::MissingDeclarator(tok))
             }
             Some(string) => {
-                let type_info = TypeInfo {
+                let type_info = self.context.get_type(&Type {
                     declarator,
-                    type_specifier,
-                };
+                    specifier,
+                });
                 if self.expect_token(TokenKind::OpenParen) {
                     self.parse_function_definition(type_info, string)
                 }
@@ -159,25 +144,27 @@ impl<'a> Parser<'a> {
     }
 
     //TODO: Error handling here
-    fn parse_declaration_specifiers(&mut self) -> Result<SpecifierInfo, ParserError> {
-        let mut type_specifier = SpecifierInfo::default();
-        while self.parse_declaration_specifier(& mut type_specifier) {
+    fn parse_declaration_specifiers(&mut self) -> Result<TypeSpecifier, ParserError> {
+        let mut specifier = TypeSpecifier::default();
+        while self.parse_declaration_specifier(& mut specifier)? {
             continue;
         }
-        Ok(type_specifier)
+        Ok(specifier)
     }
 
-    fn parse_declaration_specifier(&mut self, type_specifier: &mut SpecifierInfo) -> bool {
+    fn parse_declaration_specifier(&mut self, specifier: &mut TypeSpecifier) -> Result<bool, ParserError> {
+
+        // TOOD: Check to see if these aren't set already.
         match self.peek_token().kind {
-            TokenKind::Int => type_specifier.marked_int = true,
-            TokenKind::Void => type_specifier.marked_void = true,
-            TokenKind::Char => type_specifier.marked_char = true,
-            TokenKind::Static => type_specifier.marked_static = true,
-            TokenKind::Const => type_specifier.marked_const = true,
-            _ => {return false;}
+            TokenKind::Int => specifier.ctype = Some(CType::Int),
+            TokenKind::Void => specifier.ctype = Some(CType::Void),
+            TokenKind::Char => specifier.ctype = Some(CType::Char),
+            TokenKind::Static => specifier.qualifiers.storage = StorageQual::Static,
+            TokenKind::Const => specifier.qualifiers.cv = Some(CVQual::Const),
+            _ => {return Ok(false);}
         }
         self.get_token();
-        true
+        Ok(true)
     }
 
     fn parse_pointers(&mut self) -> Vec<DeclaratorPart> {
@@ -194,7 +181,7 @@ impl<'a> Parser<'a> {
 
         declarator
     }
-    // Adds a declarator to a TypeInfo
+    // Adds a declarator to a Type
     // Add the token name to this thing
     fn parse_declarator(&mut self, mut identifier_found: bool, check_pointers: bool) -> Result<(Vec<DeclaratorPart>, Option<InternedString>), ParserError> {
         /* Convert declarator to direct declarator, by conditionally handling pointers*/
@@ -220,7 +207,6 @@ impl<'a> Parser<'a> {
             if new_identifier.is_some()  {
                 if identifier_found == true {
                     let tok = self.prev_token();
-                    self.lexer.process_line(tok.row);
                     return Err(ParserError::GeneralError("unexepected identifier".to_string(), Some(tok)));
                 }
                 else {
@@ -261,21 +247,23 @@ impl<'a> Parser<'a> {
     }
 
 
-    fn parse_function_definition(&mut self, return_type: TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {    
+    fn parse_function_definition(&mut self, return_type: InternedType, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {    
         self.eat_token(TokenKind::OpenParen)?;
 
         let mut parameters: Vec<ASTNodeHandle> = Vec::new();
 
         while !self.expect_token(TokenKind::CloseParen) {
-            let mut type_specifier: SpecifierInfo = self.parse_declaration_specifiers()?;
+            let mut specifier: TypeSpecifier = self.parse_declaration_specifiers()?;
 
             // TODO: Check if there was actually a declaration specifier
             if let (declarator, Some(param_id), ) = self.parse_declarator(false, true)? {
                 // else ERROR
-                let param_type = TypeInfo {
+
+                let param_type = self.context.get_type(
+                &Type {
                     declarator,
-                    type_specifier
-                };
+                    specifier,
+                });
 
                 let param = ASTNode::ParameterDecl { identifier: param_id, type_info: param_type };
                 let handle = self.ast.nodes.insert(param);
@@ -289,7 +277,6 @@ impl<'a> Parser<'a> {
             }
             else {
                 let tok = self.prev_token();
-                self.lexer.process_line(tok.row);
                 return Err(ParserError::GeneralError("Expected a name for this variable.".to_string(), Some(tok)))            
             }
         }
@@ -309,8 +296,9 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn parse_declaration(&mut self, type_info: TypeInfo, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {
+    fn parse_declaration(&mut self, type_info: InternedType, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {
         let variable_token = self.prev_token(); // This is so busted.
+
 
         if self.expect_token(TokenKind::Equals) {
             self.eat_token(TokenKind::Equals)?;
@@ -322,7 +310,9 @@ impl<'a> Parser<'a> {
             let node = ASTNode::VariableDecl { identifier: identifier, initializer: Some(initializer), type_info: type_info };
 
             let node_h = self.ast.nodes.insert(node);
-            self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
+            
+            self.context.map_token(node_h, variable_token);
+            
             Ok(node_h)
 
         }
@@ -331,7 +321,8 @@ impl<'a> Parser<'a> {
 
             let node = ASTNode::VariableDecl { identifier, initializer: None, type_info: type_info };
             let node_h = self.ast.nodes.insert(node);
-            self.error_handler.borrow_mut().tokens.insert(node_h, variable_token);
+
+            self.context.map_token(node_h, variable_token);
             Ok(node_h)
         }
     }
@@ -364,21 +355,21 @@ impl<'a> Parser<'a> {
 
                 // Attempt variable declaration
                 // Parse type information
-                let type_specifier = self.parse_declaration_specifiers()?;
+                let specifier = self.parse_declaration_specifiers()?;
 
-                
-                if type_specifier.marked_int || type_specifier.marked_char {
+                if specifier.ctype == Some(CType::Int) || specifier.ctype == Some(CType::Char) {
                     match self.parse_declarator(false, true)? {
                         (declarator, None) => {
                             let tok = self.peek_token();
-                            self.lexer.process_line(tok.row);
                             return Err(ParserError::MissingDeclarator(tok))
                         },
                         (declarator, Some(identifier)) => {
-                            let type_info = TypeInfo {
+
+                            let type_info = self.context.get_type(&Type {
                                 declarator,
-                                type_specifier
-                            };
+                                specifier,
+                            });  
+
                             self.parse_declaration(type_info, identifier)
                         }
                     }
@@ -467,7 +458,7 @@ impl<'a> Parser<'a> {
     fn parse_for_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         self.eat_token(TokenKind::For)?;
         self.eat_token(TokenKind::OpenParen)?;
-        // TODO: Only certain declaration specifiers are allowed
+        // TODO: Only certain declaration specifier are allowed
         let initializer = self.parse_for_init_clause()?;
 
         let condition = if self.expect_token(TokenKind::Semicolon) {
@@ -493,8 +484,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_for_init_clause(&mut self) -> Result<ASTNodeHandle, ParserError> {
-        let specifier_info = self.parse_declaration_specifiers()?;
-        if specifier_info.marked_int {
+        let specifier = self.parse_declaration_specifiers()?;
+        if specifier.ctype == Some(CType::Int) {
             let (declarator, identifier) = self.parse_declarator(false, true)?;
 
             let identifier = if identifier.is_none() {
@@ -503,10 +494,11 @@ impl<'a> Parser<'a> {
                 identifier.unwrap()
             };
 
-            let type_info = TypeInfo {
+            let type_info = self.context.get_type(&Type {
                 declarator,
-                type_specifier: specifier_info,
-            };
+                specifier,
+            });
+            
             self.parse_declaration(type_info, identifier)
         }
         else {
@@ -722,13 +714,13 @@ impl<'a> Parser<'a> {
 
 
         if let TokenKind::Identifier(identifier) = self.peek_token().kind {
-            let tok = self.get_token();
+            let token = self.get_token();
             
             let node = ASTNode::SymbolRef {identifier: identifier};
             
             // TOOD: Write helper function that takes node and token and does this for you:
             let node_h = self.ast.nodes.insert(node);
-            self.error_handler.borrow_mut().tokens.insert(node_h, tok);
+            self.context.map_token(node_h, token);
             Ok(node_h)
         }
         else {
@@ -776,16 +768,17 @@ mod parser_tests {
     use std::rc::Rc;
 
     use crate::ast::{Vistior, ASTCheck, ASTPrint};
+    use crate::context;
     use crate::lexer::{Lexer};
     use crate::parser::{Parser};
-    use crate::strings::Strings;
     use super::*;
     
 
     #[test]
     fn var_decl() {
         let src = String::from("int a;");
-        let error_handler = Rc::new(RefCell::new(ErrorHandler::new()));
+
+        let context = Context::new();
         
         let mut lexer: Lexer<'_> = Lexer::new(src.as_str(), error_handler.clone());
         
@@ -801,7 +794,7 @@ mod parser_tests {
         
         let gold: Vec<Discriminant<ASTNode>> = vec![
             discriminant(&ASTNode::Program { declarations: Vec::new()}),
-            discriminant(&ASTNode::VariableDecl { identifier: Strings.lock().unwrap().get_or_intern("hi") , initializer: None, type_info: TypeInfo::default() }),
+            discriminant(&ASTNode::VariableDecl { identifier: Strings.lock().unwrap().get_or_intern("hi") , initializer: None, type_info: Type::new() }),
         ];
 
         for i in 0..checker.results.len() {
@@ -834,7 +827,7 @@ mod parser_tests {
         /*
         let gold: Vec<Discriminant<ASTNode<'_>>> = vec![
             discriminant(&ASTNode::BinaryOp {left: Box::new(ASTNode:: {})}),
-            discriminant(&ASTNode::VariableDecl() { identifier: Token::default(), initializer: None, type_info: TypeInfo::default() }),
+            discriminant(&ASTNode::VariableDecl() { identifier: Token::default(), initializer: None, type_info: Type::default() }),
         ];
 
         for i in 0..checker.results.len() {

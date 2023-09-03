@@ -2,28 +2,22 @@ use core::fmt;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use slotmap::{SparseSecondaryMap};
-use string_interner::symbol::{self, SymbolU16};
-use crate::ast::{Vistior, AST, ASTNode, ASTNodeHandle, TraversalOrder};
-use crate::error::ErrorHandler;
-use crate::strings::InternedString;
+use slotmap::{SparseSecondaryMap, SecondaryMap};
 
-use crate::types::TypeInfo;
-
-#[derive(Debug)]
-pub enum AnalysisError {
-    AlreadyDeclared(InternedString, ASTNodeHandle), // Used to extract line information. 
-    UnknownSymbol(InternedString, ASTNodeHandle),
-}
+use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, ASTNodePrintable};
+use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
+use lex_parse::context::{InternedString, InternedType, Context, self};
+use lex_parse::types::{Type, DeclaratorPart};
 
 pub struct STScope {
     next_param_slot: i32,
     next_variable_slot: i32,
-    var_entries: Vec<STEntry>,
+    var_entries: Vec<Declaration>,
     pub is_global: bool,
-    // tag_entries: Vec<STEntry>, TODO
+    // tag_entries: Vec<Declaration>, TODO
     // label_entries: TODO
 }
+
 
 impl STScope {
     pub fn new() -> STScope {
@@ -34,11 +28,10 @@ impl STScope {
             is_global: false,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum STEntryType {
+pub enum DeclarationType {
     VarOrParam,
     Function,
     Tag,
@@ -46,23 +39,31 @@ pub enum STEntryType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct STEntry {
+pub struct Declaration {
     pub identifier: InternedString, // TODO Make this a string
     pub size: usize,
     pub offset: i32,
-    pub type_info: TypeInfo,
+    pub type_info: InternedType,
     pub is_global: bool,
-    kind: STEntryType
+    kind: DeclarationType
 } 
 
-impl fmt::Display for STEntry {
+struct DeclarationPrintable<'a> {
+    declaration: Declaration,
+    context: &'a Context<'a>
+}
+
+impl fmt::Display for DeclarationPrintable<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "size: {}, offset: {}, type_info: {}, kind: {:?}, global: {}", self.size, self.offset, "none", self.kind, self.is_global) //self.type_info, self.kind)
+        let decl = self.declaration;
+        let type_info = self.context.resolve_type(decl.type_info);
+        write!(f, "size: {}, offset: {}, type_info: {}, kind: {:?}, global: {}", decl.size, decl.offset, type_info, decl.kind, decl.is_global) //self.type_info, self.kind)
     }
 }
 
 pub struct SymbolTable {
-    pub entries: SparseSecondaryMap<ASTNodeHandle, STEntry>,
+    // Maps Declarations AND symbol refs to Declarations.
+    pub entries: SparseSecondaryMap<ASTNodeHandle, Declaration>,
     stack: Vec<STScope>, // Reference to a STScope
 }
 
@@ -74,8 +75,8 @@ impl SymbolTable {
         st.stack.push(global_scope);
         st
     }
-    pub fn search_scope(&mut self, identifier: &InternedString, entry_type: &STEntryType) -> Option<STEntry> {
 
+    pub fn search_scope(&mut self, identifier: &InternedString, entry_type: &DeclarationType) -> Option<Declaration> {
         for entry in self.stack.last().unwrap().var_entries.as_slice() {
             if (entry.identifier == *identifier) && (*entry_type == entry.kind) {
                 return Some(entry.clone())
@@ -84,7 +85,7 @@ impl SymbolTable {
         None
     } 
 
-    pub fn search_up(&mut self, identifier: &InternedString, entry_type: &STEntryType) -> Option<STEntry> {
+    pub fn search_up(&mut self, identifier: &InternedString, entry_type: &DeclarationType) -> Option<Declaration> {
         // TODO: Make entry types match.
         let entry = self.search_scope(&identifier, &entry_type);
 
@@ -99,7 +100,7 @@ impl SymbolTable {
         entry
     }
 
-    pub fn add(&mut self, node: ASTNodeHandle, entry: STEntry) -> Result<(), AnalysisError> {
+    pub fn add(&mut self, node: ASTNodeHandle, entry: Declaration) -> Result<(), AnalysisError> {
         if self.search_scope(&entry.identifier, &entry.kind).is_some() {
             Err(AnalysisError::AlreadyDeclared(entry.identifier, node))
         }
@@ -110,6 +111,15 @@ impl SymbolTable {
         }
     }
 
+    fn get_type(& self, node: & ASTNodeHandle) -> Option<&Type> {
+        if let Some(entry) = self.entries.get(*node) {
+            Some(&entry.type_info)
+        }
+        else {
+            None
+        }
+    }
+
 
 }
 
@@ -117,13 +127,14 @@ impl SymbolTable {
 pub struct Analyzer<'a> {
     pub symbol_table: SymbolTable, // 
     ast: &'a AST,
-    error_handler: Rc<RefCell<ErrorHandler>>,
     halt: bool,
+
+    context: &'a Context<'a>, //TODO: Merge error handler and context.
 }
 
 impl <'a> Analyzer<'a> {
-    pub fn new(ast: &'a AST, error_handler: Rc<RefCell<ErrorHandler>>,) -> Analyzer<'a> {
-        Analyzer { symbol_table: SymbolTable::new(), ast: ast, error_handler, halt: false}
+    pub fn new(ast: &'a AST, context: &'a Context<'a>) -> Analyzer<'a> {
+        Analyzer { symbol_table: SymbolTable::new(), ast, context, halt: false}
     }
 
     fn enter_scope(&mut self, _next_param_slot: i32, _next_variable_slot: i32) -> () {
@@ -140,45 +151,20 @@ impl <'a> Analyzer<'a> {
     }
 
     pub fn print_symbol_table(&self) -> () {
-
-        for (key, value) in &self.symbol_table.entries {
-            let node = self.get_node(&key);
-            println!("{} {}", node, value );
+        for (handle, declaration) in &self.symbol_table.entries {
+            let node = self.get_node(&handle);
+            match node {
+                ASTNode::SymbolRef{.. } => (),
+                _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, DeclarationPrintable{declaration: declaration.clone(), context: self.context})}
+            }
         }
     }
 
-    fn report_error(&mut self, error: AnalysisError) -> () {
-        self.error_handler.borrow_mut().print_analysis_error(error);
-        self.halt = true;
-    }
-
-    
 }
 
 impl <'a> Vistior<'a> for Analyzer<'a> {
-    fn get_order(&self) -> TraversalOrder {
-        TraversalOrder::PreOrder
-    }
 
-    fn entry(&mut self, _node_h: &ASTNodeHandle) -> () {
-       
-    }
-
-    fn exit(&mut self, node_h: &ASTNodeHandle) -> () {
-        let node = self.get_node(node_h);
-        match node {
-            ASTNode::CompoundStmt { statements: _, new_scope } => {
-                if *new_scope {self.exit_scope();}
-            }
-            ASTNode::FunctionDecl { body: _, parameters: _, identifier: _, return_type: _ } => {
-                self.exit_scope();
-            }
-            
-            _ => ()
-        }
-    }
-
-    fn operate(&mut self, node_h: &ASTNodeHandle) -> () {
+    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
         let node = self.get_node(node_h).clone();
         match node {
             ASTNode::CompoundStmt { statements: _, new_scope } => {
@@ -198,11 +184,11 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
 
                 let size = type_info.calculate_size();
 
-                let entry = STEntry {
+                let entry = Declaration {
                     identifier: identifier,
                     size: size,
                     offset: scope.next_variable_slot * -1,
-                    kind: STEntryType::VarOrParam,
+                    kind: DeclarationType::VarOrParam,
                     type_info: type_info,
                     is_global: scope.is_global,
                 };
@@ -221,11 +207,11 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 let scope = self.curr_scope();
 
                 // ASsert that size = 1
-                let entry = STEntry {
+                let entry = Declaration {
                     identifier: identifier,
                     size: 1,
                     offset: scope.next_param_slot + 4,
-                    kind: STEntryType::VarOrParam,
+                    kind: DeclarationType::VarOrParam,
                     type_info: type_info,
                     is_global: false,
                 };
@@ -238,11 +224,11 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 }
             }
             ASTNode::FunctionDecl { body: _, parameters: _, identifier, return_type } => {
-                let entry = STEntry {
+                let entry = Declaration {
                     identifier: identifier,
                     size: 1,
                     offset: 0,
-                    kind: STEntryType::Function,
+                    kind: DeclarationType::Function,
                     type_info: r#return_type,
                     is_global: true,
                 };
@@ -264,13 +250,14 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
             }
             // Not a delcaration:
             ASTNode::SymbolRef { identifier } => {
-                // If this node already has an entry, than just ignore it:
-                if (self.symbol_table.entries.get(*node_h).is_some()) {
+                // If this node already has an entry, than just ignore it:,
+                // This will happen if FunctionCall sets it
+                if self.symbol_table.entries.get(*node_h).is_some() {
                     return;
                 }
 
                 // Make sure that it exists, and then map this node to the existing entry.
-                let entry = self.symbol_table.search_up(&identifier, &STEntryType::VarOrParam);
+                let entry = self.symbol_table.search_up(&identifier, &DeclarationType::VarOrParam);
                 if entry.is_none() {
                     let error = AnalysisError::UnknownSymbol(identifier, *node_h);
                     self.report_error(error);
@@ -280,14 +267,14 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 }
                 
             }
-            ASTNode::FunctionCall { symbol_ref: symbol_ref, arguments: arguments } => {
+            ASTNode::FunctionCall { symbol_ref, arguments } => {
                 // Need to do make sure this is a valid function, .i.e search up scope for it's symbol.
                 // Make sure that it exists, and then map this node to the existing entry.
                 let child = self.get_node(&symbol_ref).clone();
 
                 let (entry, identifier) = match child {
                     ASTNode::SymbolRef { identifier } => {
-                        (self.symbol_table.search_up(&identifier, &STEntryType::Function), identifier)
+                        (self.symbol_table.search_up(&identifier, &DeclarationType::Function), identifier)
                     }
                     _ => {
                         return;
@@ -301,6 +288,19 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 else {
                     self.symbol_table.entries.insert(symbol_ref, entry.unwrap());
                 }
+            }
+            _ => ()
+        }
+    }
+
+    fn postorder(&mut self, node_h: &ASTNodeHandle) -> () {
+        let node = self.get_node(node_h);
+        match node {
+            ASTNode::CompoundStmt { statements: _, new_scope } => {
+                if *new_scope {self.exit_scope();}
+            }
+            ASTNode::FunctionDecl { body: _, parameters: _, identifier: _, return_type: _ } => {
+                self.exit_scope();
             }
             _ => ()
         }

@@ -3,9 +3,9 @@ use std::{error, cell::RefCell, rc::Rc};
 
 use colored::Colorize;
 
-use crate::{token::{Token, TokenKind, self}, strings::{InternedString, Strings}, error::{LexerError, ErrorHandler}};
+use crate::{token::{Token, TokenKind, self}, context::{InternedString, Context}, error::{LexerError, ErrorHandler}};
 
-pub struct Lexer<'a> {
+pub struct Lexer<'a, 'ctx> {
     index: usize,
     line_idx: usize, // TODO: Combine line_idx and index
     line_start: usize,
@@ -13,36 +13,36 @@ pub struct Lexer<'a> {
     col: usize,
     input_stream: &'a str,
     putback: char,
-    error_handler: Rc<RefCell<ErrorHandler>>,
+
+    context: &'a Context<'ctx>,
 }
-
-
 
 pub(crate) const EOF_CHAR: char = '\0';
 
-impl<'a> Lexer<'a> {
+impl<'a, 'ctx> Lexer<'a, 'ctx> {
 
-    pub fn new(src: &'a str, error_handler: Rc<RefCell<ErrorHandler>>) -> Lexer<'a> {
+    pub fn new(input_stream: &'a str, context: &'a Context<'ctx>) -> Lexer<'a, 'ctx> {
         Lexer {
             index: 0,
             line_idx: 0,
             line_start: 0,
             row: 0,
             col: 0,
-            input_stream: src,
+            input_stream,
+            context,
             putback: EOF_CHAR,
-            error_handler
         }
     }
 
-    pub fn process_line(&mut self, line: usize ) -> Option<InternedString> {
+    /*    pub fn process_line(&mut self, line: usize ) -> Option<InternedString> {
         while self.error_handler.borrow_mut().lines.get(line).is_none(){ // If the line isn't in the buffer, loop until it is.
             if self.next() == EOF_CHAR {break;}
         }
         self.error_handler.borrow_mut().lines.get(line).copied()
-    }
+    } */
 
-    pub fn get_token(&mut self) -> Result<Token, ()> {
+
+    pub fn get_token(&mut self) -> Result<Token, LexerError> {
        
         self.skip_until();
         
@@ -156,18 +156,19 @@ impl<'a> Lexer<'a> {
             }
             _ if ch.is_ascii_alphanumeric() || ch == '_' => {
                 let string = self.symbol(ch).unwrap();
-                match Strings.lock().unwrap().resolve(string) {
-                    Some("auto") => Ok(TokenKind::Auto),
-                    Some("break") => Ok(TokenKind::Break),
-                    Some("int") => Ok(TokenKind::Int),
-                    Some("return") => Ok(TokenKind::Return),
-                    Some("void") => Ok(TokenKind::Void),
-                    Some("static") => Ok(TokenKind::Static),
-                    Some("if") => Ok(TokenKind::If),
-                    Some("else") => Ok(TokenKind::Else),
-                    Some("for") => Ok(TokenKind::For),
-                    Some("while") => Ok(TokenKind::While),
-                    Some("do") => Ok(TokenKind::Do),
+                
+                match self.context.resolve_string(string).as_str() {
+                    "auto" => Ok(TokenKind::Auto),
+                    "break" => Ok(TokenKind::Break),
+                    "int" => Ok(TokenKind::Int),
+                    "return" => Ok(TokenKind::Return),
+                    "void" => Ok(TokenKind::Void),
+                    "static" => Ok(TokenKind::Static),
+                    "if" => Ok(TokenKind::If),
+                    "else" => Ok(TokenKind::Else),
+                    "for" => Ok(TokenKind::For),
+                    "while" => Ok(TokenKind::While),
+                    "do" => Ok(TokenKind::Do),
                     // TODO:
                     _  => Ok(TokenKind::Identifier(string))
                 }
@@ -234,8 +235,7 @@ impl<'a> Lexer<'a> {
         }
         self.putback(ch);
         
-        let str = Strings.lock().unwrap().get_or_intern(str);
-        Ok(str)
+        Ok(self.context.get_string(&str))
     }
 
     fn string_literal(&mut self) -> Result<InternedString, ()> {
@@ -245,8 +245,7 @@ impl<'a> Lexer<'a> {
             str.push(ch);
             ch = self.next();
         }
-        let str = Strings.lock().unwrap().get_or_intern(str);
-        Ok(str)
+        Ok(self.context.get_string(&str))
     }
 
     fn next(&mut self) -> char {
@@ -290,8 +289,6 @@ impl<'a> Lexer<'a> {
     } 
 
     fn advance(&mut self) -> () {
-        let interned_line =  Strings.lock().unwrap().get_or_intern(&self.input_stream[0..self.line_idx]);
-        self.error_handler.borrow_mut().lines.push(interned_line);
         self.input_stream = &self.input_stream[self.line_idx..];
         self.line_idx = 0;
     }
@@ -308,7 +305,6 @@ mod lexer_tests {
 
     use crate::error::ErrorHandler;
     use crate::lexer::{Lexer};
-    use crate::strings::Strings;
     use crate::token::{TokenKind};
 
     #[test]

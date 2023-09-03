@@ -1,10 +1,10 @@
 
 use slotmap::{SlotMap, SecondaryMap};
-use std::fmt;
+use std::fmt::{self, write, Display};
 use std::mem::Discriminant;
 
-use crate::strings::{InternedString, Strings};
-use crate::types::{TypeInfo};
+use crate::context::{InternedString, Context, InternedType};
+use crate::types::{Type};
 use crate::token::{Token};
 
 // Need to maintain some maps, first is debug info, which maps ASTNodes to tokens.
@@ -62,6 +62,7 @@ impl <'a> AST {
     }
 }
 
+
 // Todo: Split into different lifetimes, one for nodes one for token references.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode {
@@ -73,16 +74,16 @@ pub enum ASTNode {
         body: ASTNodeHandle,
         parameters: Vec<ASTNodeHandle>,
         identifier: InternedString,
-        return_type: TypeInfo
+        return_type: InternedType
     },
     ParameterDecl {
         identifier: InternedString,
-        type_info: TypeInfo
+        type_info: InternedType
     },
     VariableDecl {
         identifier: InternedString,
         initializer: Option<ASTNodeHandle>,
-        type_info: TypeInfo
+        type_info: InternedType
     },
     // ==== Expressions: ====
     IntLiteral {
@@ -140,15 +141,82 @@ pub enum ASTNode {
     DeclStmt {
         declarations: Vec<ASTNodeHandle>,
     },
+    
     InlineAsm {
         assembly: InternedString,
     }
 }
-#[derive(Debug, Clone, PartialEq)]
-pub enum TraversalOrder {
-    InOrder,
-    PostOrder,
-    PreOrder
+
+pub struct ASTNodePrintable<'a> {
+    node: ASTNode,
+    context: &'a Context<'a>
+}
+
+impl Display for ASTNodePrintable<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.node {
+            ASTNode::BinaryOp { op, right: _, left: _ } => {
+                write!(f, "<BinaryOp, op: {:?}>", op)
+            }
+            ASTNode::CompoundStmt { statements: _, new_scope: _ } => {
+                write!(f, "<CompoundStmt>")
+            }
+            ASTNode::Program { declarations: _ } => {
+                write!(f, "<Program>")
+            },
+            ASTNode::FunctionDecl { body: _, parameters: _, identifier, return_type: _ } => {
+                write!(f, "<FunctionDecl, {}>", self.context.resolve_string(*identifier))
+            },
+            // TODO: Find some way to pritn type info
+            ASTNode::ParameterDecl { identifier, type_info: _ } => {
+                write!(f, "<ParameterDecl, {}>", self.context.resolve_string(*identifier))
+            }
+            ASTNode::VariableDecl { identifier, initializer: _, type_info: type_info } => {
+                write!(f, "<VariableDecl, {}, {}>", self.context.resolve_string(*identifier), self.context.resolve_type(*type_info))
+            },
+            ASTNode::IntLiteral { value } => {
+                write!(f, "<IntLiteral, {}>", value)
+            },
+            ASTNode::FunctionCall { symbol_ref: _, arguments: _ } => {
+                write!(f, "<FunctionCall>")
+            },
+            ASTNode::SymbolRef { identifier } => {
+                write!(f, "<SymbolRef, {}>", self.context.resolve_string(*identifier))
+            },
+            ASTNode::UnaryOp { op, child: _, order } => {
+                write!(f, "<UnaryOp, op: {:?}, preorder: {:?}>", op, order)
+            },
+            ASTNode::Ternary { first: _, second: _, third: _ } => {
+                write!(f, "<TernaryOp>")
+            },
+            ASTNode::ExpressionStmt { expression: _ } => {
+                write!(f, "<ExpressionStmt>")
+            },
+            ASTNode::ReturnStmt { expression: _ } => {
+                write!(f, "<ReturnStmt>")
+            },
+            ASTNode::ForStmt { initializer: _, condition: _, update: _, body: _ } => {
+                write!(f, "<ForStmt>")
+            },
+            ASTNode::WhileStmt { condition: _, body: _ } => {
+                write!(f, "<WhileStmt>")
+            },
+            ASTNode::IfStmt { condition: _, if_branch: _, else_branch: _ } =>  {
+                write!(f, "<IfStmt>")
+            },
+            ASTNode::DeclStmt { declarations: _ } =>  {
+                write!(f, "<DeclStmt>")
+            },
+            ASTNode::InlineAsm { assembly: _ } => todo!(),
+            /*
+            ASTNode::ImplicitCast { child, cast } => {
+                match cast {
+                    CastType::ArrayPointerDecay => write!(f, "<ImplicitCast> \"ArrayToPointerDecay\""),
+                    CastType::LvalueToRvalue => write!(f, "<ImplicitCast> \"LValueToRValue\""),
+                }
+            },  */
+        }
+    }
 }
 
 pub trait Vistior<'a> {
@@ -157,15 +225,9 @@ pub trait Vistior<'a> {
             return;
         }
 
-        let order: TraversalOrder = self.get_order();
-
         let node: ASTNode = self.get_node(node_h).clone();
 
-        self.entry(node_h);
-
-        if order == TraversalOrder::PreOrder {
-            self.operate(node_h);
-        }
+        self.preorder(node_h);
 
         match node {
             ASTNode::BinaryOp { op: _, right, left } => {
@@ -244,28 +306,18 @@ pub trait Vistior<'a> {
                     self.traverse(decl);
                 }
             },
-            //_ => todo!()
-
         }
 
-        if order == TraversalOrder::PostOrder {
-            self.operate(node_h);
-        }
-
-        self.exit(node_h);
+        self.postorder(node_h);
     }
 
-    // Implementations must overload:
-    fn operate(&mut self, _node_h: &ASTNodeHandle) -> ();
-
-    fn get_order(&self) -> TraversalOrder;
-
+    // Implementations must overloadd
     fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode;
 
     // Optional overload
-    fn entry(&mut self, _node_h: &ASTNodeHandle) -> () {}
+    fn preorder(&mut self, _node_h: &ASTNodeHandle) -> () {}
 
-    fn exit(&mut self, _node_h: &ASTNodeHandle) -> () {}
+    fn postorder(&mut self, _node_h: &ASTNodeHandle) -> () {}
 
     fn halt(& self) -> bool {false}
 
@@ -274,21 +326,19 @@ pub trait Vistior<'a> {
 // AST Checker
 pub struct ASTCheck<'a> {
     pub results: Vec<Discriminant<ASTNode>>,
+    context: &'a Context<'a>,
     ast: &'a AST,
 }
 
 impl<'a> ASTCheck<'a>{
-    pub fn new(ast: &'a AST) -> ASTCheck<'a> {
-        ASTCheck { results: Vec::new(), ast}
+    pub fn new(ast: &'a AST, context: &'a Context<'a>) -> ASTCheck<'a> {
+        ASTCheck { context, results: Vec::new(), ast}
     }
 }
 
 impl <'a> Vistior<'a> for ASTCheck<'a> {
-    fn get_order(&self) -> TraversalOrder {
-        TraversalOrder::PreOrder
-    }
 
-    fn operate(&mut self, node_h: &ASTNodeHandle) -> () {
+    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
         let node = self.get_node(node_h);
         self.results.push(std::mem::discriminant(&node));
     }
@@ -305,20 +355,19 @@ pub struct ASTPrint<'a> {
     pub debug_mode: bool,
     pub depth: usize,
     ast: &'a AST,
+    context: &'a Context<'a>,
 }
 
 impl <'a> ASTPrint<'a> {
-    pub fn new(debug_mode: bool, ast: &'a AST) -> ASTPrint<'a> {
-        ASTPrint { debug_mode , depth: 0, ast}
+    pub fn new(debug_mode: bool, ast: &'a AST, context: &'a Context<'a>) -> ASTPrint<'a> {
+        ASTPrint { context, debug_mode , depth: 0, ast}
     }
 }
 
 impl <'a> Vistior<'a> for ASTPrint<'a> {
-    fn get_order(&self) -> TraversalOrder {
-        TraversalOrder::PreOrder
-    }
 
-    fn operate(&mut self, node_h: &ASTNodeHandle) -> () {
+    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
+        self.depth += 1;
         // TODO: Condition on debug mdoe vs pretty mode
         let node = self.get_node(node_h);
         let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
@@ -326,16 +375,13 @@ impl <'a> Vistior<'a> for ASTPrint<'a> {
             println!("{whitespace_string}{:?}", node)
         }
         else {
-            println!("{whitespace_string}{}", node)
+            let printable = ASTNodePrintable{ node: node.clone(), context: self.context};
+            println!("{whitespace_string}{:}", printable);
         }
         
     }
 
-    fn entry(&mut self, _node_h: &ASTNodeHandle) -> () {
-        self.depth += 1;
-    }
-
-    fn exit(&mut self, _node_h: &ASTNodeHandle) -> () {
+    fn postorder(&mut self, _node_h: &ASTNodeHandle) -> () {
         self.depth -= 1;
     }
 
@@ -343,68 +389,4 @@ impl <'a> Vistior<'a> for ASTPrint<'a> {
         self.ast.nodes.get(*node_h).unwrap()
     }
     
-}
-
-
-impl fmt::Display for ASTNode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ASTNode::BinaryOp { op, right: _, left: _ } => {
-                write!(f, "<BinaryOp, op: {:?}>", op)
-            }
-            ASTNode::CompoundStmt { statements: _, new_scope: _ } => {
-                write!(f, "<CompoundStmt>")
-            }
-            ASTNode::Program { declarations: _ } => {
-                write!(f, "<Program>")
-            },
-            ASTNode::FunctionDecl { body: _, parameters: _, identifier, return_type: _ } => {
-                
-                write!(f, "<FunctionDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
-            },
-            // TODO: Find some way to pritn type info
-            ASTNode::ParameterDecl { identifier, type_info: _ } => {
-                write!(f, "<ParameterDecl, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
-            }
-            ASTNode::VariableDecl { identifier, initializer: _, type_info: type_info } => {
-                write!(f, "<VariableDecl, {}, {type_info}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
-            },
-            ASTNode::IntLiteral { value } => {
-                write!(f, "<IntLiteral, {}>", value)
-            },
-            ASTNode::FunctionCall { symbol_ref: _, arguments: _ } => {
-                write!(f, "<FunctionCall>")
-            },
-            ASTNode::SymbolRef { identifier } => {
-                write!(f, "<SymbolRef, {}>", Strings.lock().unwrap().resolve(*identifier).unwrap())
-            },
-            ASTNode::UnaryOp { op, child: _, order } => {
-                write!(f, "<UnaryOp, op: {:?}, preorder: {:?}>", op, order)
-            },
-            ASTNode::Ternary { first: _, second: _, third: _ } => {
-                write!(f, "<TernaryOp>")
-            },
-            ASTNode::ExpressionStmt { expression: _ } => {
-                write!(f, "<ExpressionStmt>")
-            },
-            ASTNode::ReturnStmt { expression: _ } => {
-                write!(f, "<ReturnStmt>")
-            },
-            ASTNode::ForStmt { initializer: _, condition: _, update: _, body: _ } => {
-                write!(f, "<ForStmt>")
-            },
-            ASTNode::WhileStmt { condition: _, body: _ } => {
-                write!(f, "<WhileStmt>")
-            },
-            ASTNode::IfStmt { condition: _, if_branch: _, else_branch: _ } =>  {
-                write!(f, "<IfStmt>")
-            },
-            ASTNode::DeclStmt { declarations: _ } =>  {
-                write!(f, "<DeclStmt>")
-            },
-            ASTNode::InlineAsm { assembly: _ } => todo!(),
-            
-        }
-        
-    }
 }
