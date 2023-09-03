@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use slotmap::{SparseSecondaryMap, SecondaryMap};
 
-use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, BinaryOpType, ASTNodePrintable};
+use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, BinaryOpType, ASTNodePrintable, UnaryOpType};
 use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{Context, InternedType, InternedString};
 use lex_parse::types::{Type, DeclaratorPart, TypeSpecifier, StorageQual, Qualifiers, CType};
@@ -14,7 +14,7 @@ use crate::symbol_table::SymbolTable;
 
 pub struct Typecheck<'a> {
     symbol_table: &'a SymbolTable, // 
-    ast: &'a AST,
+    ast: &'a mut AST,
 
     types: SecondaryMap<ASTNodeHandle, InternedType>,
     values: SecondaryMap<ASTNodeHandle, V>,
@@ -74,7 +74,28 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                     },
                     _ => {
                         // Convert lvalues to Rvalues
+                        // Insert Cast Node
+                        // Very difficult to mutate data structure you are traversing over.
+                        /**
+                        let mut binop = self.ast.nodes.get_mut(*node_h);
+
+                        if let Some(binop) = binop.as_mut() {
+                            if let ASTNode::BinaryOp { op, right, left } = binop {
+                                // Try a cast on both left and right LOL
+                                let child = right.clone();
+                                let cast = ASTNode::UnaryOp { op: lex_parse::ast::UnaryOpType::Address, child: child, order: false };
+                                let cast = self.ast.nodes.insert(cast);
+                                *right = cast;
+                            }
+                        };  */
+
+                        //let cast = 
+
+
                         match self.values.get(right).unwrap() {
+
+
+
                             V::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
                             V::RValue => ()
                         }
@@ -96,7 +117,7 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
 }
 
 impl <'a, 'ast> Typecheck<'ast> {
-    pub fn new(symbol_table: &'a SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
+    pub fn new(symbol_table: &'a SymbolTable, ast: &'a mut AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
         Typecheck { symbol_table, ast, types: SecondaryMap::new(), values: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
     }
 

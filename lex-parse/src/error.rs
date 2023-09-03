@@ -149,7 +149,7 @@ impl <'ctx> ErrorHandler<'ctx> {
             ParserError::MissingSemicolon(token) => {
                 println!("{} expected semicolon", "error:".red());
                 self.print_line(token.row);
-                self.print_arrow(token.row, ((token.col + token.length) as i32 - 1).try_into().unwrap())
+                self.print_arrow(token.row, ((token.col + token.length) as i32).try_into().unwrap())
             },
             ParserError::ExpectedConstantInt(token) => {
                 println!("{} complex expressions here are not enabled, please use a single int", "error:".red());

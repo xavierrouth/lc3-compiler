@@ -55,13 +55,10 @@ fn main() {
     let mut lexer: lexer::Lexer<'_, '_> = lexer::Lexer::new(&input_stream, &context, &error_handler);
     let parser: parser::Parser<'_> = parser::Parser::new(&mut lexer, &context, &error_handler);
 
-    let ast = parser.parse();
-
-    if ast.is_err() {
-        return;
-    }
-
-    let ast = ast.unwrap();
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(error) => {error_handler.print_parser_error(error); return},
+    };
 
     let root =&ast.root.unwrap();
     if cli.verbose {
