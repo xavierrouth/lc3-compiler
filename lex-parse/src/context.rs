@@ -44,6 +44,10 @@ impl <'ctx> Context <'ctx>{
         self.tokens.borrow_mut().insert(node, token);
     }
 
+    pub fn get_token(&self, node: ASTNodeHandle) -> Option<Token> {
+        self.tokens.borrow().get(node).cloned()
+    }
+
 
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]

@@ -4,19 +4,20 @@ use std::rc::Rc;
 
 use slotmap::{SparseSecondaryMap, SecondaryMap};
 
-use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle};
+use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, BinaryOpType, ASTNodePrintable};
 use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{Context, InternedType, InternedString};
 use lex_parse::types::{Type, DeclaratorPart, TypeSpecifier, StorageQual, Qualifiers, CType};
 
-use crate::analysis::SymbolTable;
+use crate::symbol_table::SymbolTable;
 
 
 pub struct Typecheck<'a> {
     symbol_table: &'a SymbolTable, // 
     ast: &'a AST,
 
-    types: SecondaryMap<ASTNodeHandle, (InternedType, V)>,
+    types: SecondaryMap<ASTNodeHandle, InternedType>,
+    values: SecondaryMap<ASTNodeHandle, V>,
     casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>,
     halt: bool,
 
@@ -29,16 +30,84 @@ pub enum TypeCast {
     LvalueToRvalue,
 }
 
+impl fmt::Display for TypeCast {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeCast::ArrayToPointerDecay => write!(f, "Array to Pointer Decay"),
+            TypeCast::LvalueToRvalue => write!(f, "LValue to Rvalue"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum V {
     LValue,
     RValue,
 }
 
+impl <'a> Vistior<'a> for Typecheck<'a> {
+    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
+        self.ast.get_node(node_h)
+    }
+
+    fn postorder(&mut self, node_h: &ASTNodeHandle) -> () {
+        let node = self.get_node(node_h).clone();
+        // We only need to check expressions really.
+        let value = match node {
+            ASTNode::IntLiteral { value } => {
+                self.types.insert(*node_h, self.get_int_type());
+                V::RValue
+            },
+            ASTNode::FunctionCall { symbol_ref, arguments } => todo!(),
+            ASTNode::SymbolRef { identifier } => {
+                self.try_array_decay(node_h); // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
+                V::LValue
+            },
+            ASTNode::BinaryOp { op, right, left } => {
+                match op {
+                    BinaryOpType::Assign => {
+                        match self.values.get(right).unwrap() {
+                            V::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
+                            V::RValue => ()
+                        }
+                        // Check here that Rleft is Rvalue.
+                    },
+                    _ => {
+                        // Convert lvalues to Rvalues
+                        match self.values.get(right).unwrap() {
+                            V::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
+                            V::RValue => ()
+                        }
+                        match self.values.get(left).unwrap() {
+                            V::LValue => {self.casts.insert(left, TypeCast::LvalueToRvalue);},
+                            V::RValue => ()
+                        }
+                    }
+                }
+                V::RValue // Unless its a array index, then you can get an Lvalue from that
+                
+            },
+            _ => {V::RValue},
+        };
+        self.values.insert(*node_h, value);
+    }
+
+    fn halt(& self) -> bool {false}
+}
+
 impl <'a, 'ast> Typecheck<'ast> {
-    //fn check_ast(&mut self) -> (SecondaryMap<ASTNodeHandle, (TypeInfo, V), SparseSecondaryMap<>) {
-        
-    //}
+    pub fn new(symbol_table: &'a SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
+        Typecheck { symbol_table, ast, types: SecondaryMap::new(), values: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
+    }
+
+    pub fn print_casts(&self) -> () {
+        for (handle, cast) in &self.casts {
+            let node = self.get_node(&handle);
+            match node {
+                _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, cast)}
+            }
+        }
+    } 
 
     fn get_int_type(&self) -> InternedType {
         self.context.get_type(
@@ -52,30 +121,7 @@ impl <'a, 'ast> Typecheck<'ast> {
         )
     }
 
-    fn check_expression(&mut self, node_h: &ASTNodeHandle) -> () {
-        let node = self.get_node(node_h);
-        // We only need to check expressions really.
-        match node {
-            
-            ASTNode::IntLiteral { value } => {
-                self.types.insert(*node_h, (self.get_int_type(), V::RValue));
-            },
-            ASTNode::FunctionCall { symbol_ref, arguments } => todo!(),
-            ASTNode::SymbolRef { identifier } => {
-                self.try_array_decay(node_h); // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
-            },
-            ASTNode::BinaryOp { op, right, left } => {
-                self.check_expression(right);
-                self.check_expression(left);
-            },
-            ASTNode::UnaryOp { op, child, order } => todo!(),
-            ASTNode::Ternary { first, second, third } => todo!(),
-            _ => (),
-
-        }
-    }
-
-    fn try_array_decay(& self, node_h: &ASTNodeHandle) -> () {
+    fn try_array_decay(& mut self, node_h: &ASTNodeHandle) -> () {
         // Assert that this is a symbol ref.
         let symbol = self.symbol_table.entries.get(*node_h).unwrap();
 
@@ -87,56 +133,9 @@ impl <'a, 'ast> Typecheck<'ast> {
             *first = DeclaratorPart::PointerDecl(None);
 
             let r#type = self.context.get_type(&r#type);
-            self.types.insert(*node_h, (r#type, V::RValue));
+            self.types.insert(*node_h, r#type);
+
         }        
     }
-
-    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
-        self.ast.nodes.get(*node_h).unwrap()
-    }
-
-
-}
-/*
-
-ASTNode::SymbolRef { identifier } => {
-    self.try_array_decay(node_h);
-}
-ASTNode::IntLiteral { value } => {
-    self.mutate_entry(node_h, |entry| {
-        entry.type_info.lr = Some(V::Rvalue);
-    });
 }
 
-_ => (),
-
-
-    // This seems so wrong.
-    fn try_array_decay(&mut self, node_h: &ASTNodeHandle) -> () {
-        let tmp = self.symbol_table.entries.get_mut(*node_h);
-        let mut entry = tmp;
-
-        if let Some(entry) = entry.as_mut() {
-            if entry.type_info.lr == Some(V::Lvalue) && entry.type_info.is_array() {
-                let first = entry.type_info.declarator.first_mut().unwrap();
-                *first = DeclaratorPart::PointerDecl(None);
-                entry.type_info.lr = Some(V::Rvalue);
-            }
-        }
-    }
-
-    fn mutate_entry<F>(&mut self, node_h: &ASTNodeHandle, closure: F)
-    where F: Fn(&mut &mut Declaration),
-    {
-        let tmp = self.symbol_table.entries.get_mut(*node_h);
-        let mut entry = tmp;
-
-        if let Some(entry) = entry.as_mut() {
-            closure(entry);
-        }
-        else {
-            let entry = Declaration {
-
-            }
-        }
-    } */

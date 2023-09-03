@@ -15,13 +15,14 @@ pub struct Lexer<'a, 'ctx> {
     putback: char,
 
     context: &'a Context<'ctx>,
+    error_handler: &'a ErrorHandler<'a>
 }
 
 pub(crate) const EOF_CHAR: char = '\0';
 
 impl<'a, 'ctx> Lexer<'a, 'ctx> {
 
-    pub fn new(input_stream: &'a str, context: &'a Context<'ctx>) -> Lexer<'a, 'ctx> {
+    pub fn new(input_stream: &'a str, context: &'a Context<'ctx>, error_handler: &'a ErrorHandler<'a>) -> Lexer<'a, 'ctx> {
         Lexer {
             index: 0,
             line_idx: 0,
@@ -29,8 +30,10 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
             row: 0,
             col: 0,
             input_stream,
-            context,
             putback: EOF_CHAR,
+
+            context,
+            error_handler,
         }
     }
 
@@ -169,6 +172,7 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
                     "for" => Ok(TokenKind::For),
                     "while" => Ok(TokenKind::While),
                     "do" => Ok(TokenKind::Do),
+                    "const" => Ok(TokenKind::Const),
                     // TODO:
                     _  => Ok(TokenKind::Identifier(string))
                 }

@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{error, iter::successors};
+use std::{error, iter::successors, cell::RefCell};
 
 use colored::Colorize;
 use slotmap::SecondaryMap;
@@ -50,28 +50,21 @@ impl fmt::Display for LexerError {
     }
 }
 
-
 pub struct ErrorHandler<'ctx> {
-    pub tokens: SecondaryMap<ASTNodeHandle, Token>,  
-    pub fatal: bool,
+    pub fatal: RefCell<bool>,
     context: &'ctx Context<'ctx>
 }
 
 impl <'ctx> ErrorHandler<'ctx> {
     pub fn new(context: &'ctx Context<'ctx>) -> ErrorHandler<'ctx> {
         ErrorHandler {
-            tokens: SecondaryMap::new(),
-            fatal: false,
+            fatal: false.into(),
             context,
         }
     }
 
-    pub fn print_error(&self, ) -> () {
-
-    }
-
-    pub fn print_analysis_error(&mut self, error: AnalysisError) -> () {
-        self.fatal = true;
+    pub fn print_analysis_error(& self, error: AnalysisError) -> () {
+        *self.fatal.borrow_mut() = true;
         fn get_whitespace(count: usize) -> String {
             std::iter::repeat(' ').take(count).collect()
         }
@@ -79,29 +72,29 @@ impl <'ctx> ErrorHandler<'ctx> {
         match error {
             // TODO: Report previous declaration. No, I don't want to.
             AnalysisError::AlreadyDeclared(identifier, node_h) => {
-                let token = self.tokens.get(node_h).unwrap();
+                let token = self.context.get_token(node_h).unwrap();
 
                 let line = self.context.get_line(token.row);
                 let identifier = self.context.resolve_string(identifier);
 
                 println!("{} redeclaration of '{}'", "error:".red(), identifier);
-                print!("line {} | {} ", token.row + 1, line);
+                println!("line {} | {} ", token.row + 1, line);
                 
                 let mut length: usize = "line  | ".len();
                 let n = token.row + 1;
                 length += successors(Some(n), |&n| (n >= 10).then(|| n / 10)).count(); // Number of spaces this int takes up.
 
-                println!("{}{}", get_whitespace(length + token.col - 2), "^".green());
+                println!("{}{}", get_whitespace(length + token.col - 1), "^".green());
 
             }
             AnalysisError::UnknownSymbol(identifier, node_h) => {
-                let token = self.tokens.get(node_h).unwrap();
+                let token = self.context.get_token(node_h).unwrap();
 
                 let line = self.context.get_line(token.row);
                 let identifier = self.context.resolve_string(identifier);
 
                 println!("{} unknown identifier: '{}'", "error:".red(), identifier);
-                print!("line {} | {} ", token.row + 1, line);
+                println!("line {} | {} ", token.row + 1, line);
                 
                 let mut length: usize = "line  | ".len();
                 let n = token.row + 1;
@@ -127,7 +120,7 @@ impl <'ctx> ErrorHandler<'ctx> {
     fn print_line(& self, line_num: usize) -> () {
 
         let line = self.context.get_line(line_num);
-        print!("line {} | {} ", line_num + 1, line);
+        println!("line {} | {} ", line_num + 1, line);
     }
 
     fn get_whitespace(count: usize) -> String {

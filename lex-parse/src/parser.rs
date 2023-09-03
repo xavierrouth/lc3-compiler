@@ -22,17 +22,19 @@ pub struct Parser<'a> {
     lexer: &'a mut Lexer<'a, 'a>,
     putback_stack: Vec<Token>, 
     token: Token, // The last token that was returend
-    context: &'a Context<'a> //TODO: Merge error handler and context.
-}
 
+    context: &'a Context<'a>, //TODO: Merge error handler and context.
+    error_handler: &'a ErrorHandler<'a>,
+}
 impl<'a> Parser<'a> {
-    pub fn new(lexer: &'a mut Lexer<'a, 'a>, context: &'a Context<'a>) -> Parser<'a> {
+    pub fn new(lexer: &'a mut Lexer<'a, 'a>, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Parser<'a> {
         Parser {
             putback_stack: Vec::new(),
             token: Token::default(),
             ast: AST::new(),
             lexer,
             context,
+            error_handler,
         }
     }
 

@@ -148,8 +148,8 @@ pub enum ASTNode {
 }
 
 pub struct ASTNodePrintable<'a> {
-    node: ASTNode,
-    context: &'a Context<'a>
+    pub node: ASTNode,
+    pub context: &'a Context<'a>
 }
 
 impl Display for ASTNodePrintable<'_> {

@@ -67,7 +67,7 @@ impl fmt::Display for CType {
 impl fmt::Display for TypeSpecifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.ctype {
-            Some(ctype) =>  write!(f, "{} {}", self.qualifiers, ctype),
+            Some(ctype) =>  write!(f, "{}{}", self.qualifiers, ctype),
             None => write!(f, "{}", self.qualifiers),
         }
        
@@ -151,7 +151,6 @@ impl Type {
 }
 
 
-
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         
@@ -186,7 +185,7 @@ impl fmt::Display for Type {
         }
         let string = print_declarator(& mut self.declarator.clone(), false);
 
-        write!(f, "{:} {string}", self.specifier)
+        write!(f, "{:}{string}", self.specifier)
     }
     
 }

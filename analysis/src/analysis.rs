@@ -9,132 +9,31 @@ use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{InternedString, InternedType, Context, self};
 use lex_parse::types::{Type, DeclaratorPart};
 
-pub struct STScope {
-    next_param_slot: i32,
-    next_variable_slot: i32,
-    var_entries: Vec<Declaration>,
-    pub is_global: bool,
-    // tag_entries: Vec<Declaration>, TODO
-    // label_entries: TODO
-}
-
-
-impl STScope {
-    pub fn new() -> STScope {
-        STScope {
-            next_param_slot: 0,
-            next_variable_slot: 0,
-            var_entries: Vec::new(),
-            is_global: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DeclarationType {
-    VarOrParam,
-    Function,
-    Tag,
-    Label,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Declaration {
-    pub identifier: InternedString, // TODO Make this a string
-    pub size: usize,
-    pub offset: i32,
-    pub type_info: InternedType,
-    pub is_global: bool,
-    kind: DeclarationType
-} 
-
-struct DeclarationPrintable<'a> {
-    declaration: Declaration,
-    context: &'a Context<'a>
-}
-
-impl fmt::Display for DeclarationPrintable<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let decl = self.declaration;
-        let type_info = self.context.resolve_type(decl.type_info);
-        write!(f, "size: {}, offset: {}, type_info: {}, kind: {:?}, global: {}", decl.size, decl.offset, type_info, decl.kind, decl.is_global) //self.type_info, self.kind)
-    }
-}
-
-pub struct SymbolTable {
-    // Maps Declarations AND symbol refs to Declarations.
-    pub entries: SparseSecondaryMap<ASTNodeHandle, Declaration>,
-    stack: Vec<STScope>, // Reference to a STScope
-}
-
-impl SymbolTable {
-    pub fn new() -> SymbolTable {
-        let mut st = SymbolTable { entries: SparseSecondaryMap::new(), stack: Vec::new()};
-        let mut global_scope = STScope::new();
-        global_scope.is_global = true;
-        st.stack.push(global_scope);
-        st
-    }
-
-    pub fn search_scope(&mut self, identifier: &InternedString, entry_type: &DeclarationType) -> Option<Declaration> {
-        for entry in self.stack.last().unwrap().var_entries.as_slice() {
-            if (entry.identifier == *identifier) && (*entry_type == entry.kind) {
-                return Some(entry.clone())
-            }
-        }
-        None
-    } 
-
-    pub fn search_up(&mut self, identifier: &InternedString, entry_type: &DeclarationType) -> Option<Declaration> {
-        // TODO: Make entry types match.
-        let entry = self.search_scope(&identifier, &entry_type);
-
-        for scope in self.stack.iter().rev(){
-            for entry in scope.var_entries.as_slice() {
-                if (entry.identifier == *identifier) && (*entry_type == entry.kind) {
-                    return Some(entry.clone())
-                }
-                
-            }
-        }
-        entry
-    }
-
-    pub fn add(&mut self, node: ASTNodeHandle, entry: Declaration) -> Result<(), AnalysisError> {
-        if self.search_scope(&entry.identifier, &entry.kind).is_some() {
-            Err(AnalysisError::AlreadyDeclared(entry.identifier, node))
-        }
-        else {
-            self.stack.last_mut().unwrap().var_entries.push(entry.clone());
-            self.entries.insert(node, entry);
-            Ok(())
-        }
-    }
-
-    fn get_type(& self, node: & ASTNodeHandle) -> Option<&Type> {
-        if let Some(entry) = self.entries.get(*node) {
-            Some(&entry.type_info)
-        }
-        else {
-            None
-        }
-    }
-
-
-}
+use crate::symbol_table::{self, SymbolTable, STScope, Declaration, DeclarationType, DeclarationPrintable};
 
 /** Analysis pass on AST, borrows AST while it is alive. */
 pub struct Analyzer<'a> {
     pub symbol_table: SymbolTable, // 
     ast: &'a AST,
     halt: bool,
-
+    
+    error_handler: &'a ErrorHandler<'a>,
     context: &'a Context<'a>, //TODO: Merge error handler and context.
 }
 
 impl <'a> Analyzer<'a> {
-    pub fn new(ast: &'a AST, context: &'a Context<'a>) -> Analyzer<'a> {
-        Analyzer { symbol_table: SymbolTable::new(), ast, context, halt: false}
+    pub fn new(ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Analyzer<'a> {
+        Analyzer { symbol_table: SymbolTable::new(), ast, context, error_handler, halt: false}
+    }
+
+    pub fn print_symbol_table(&self) -> () {
+        for (handle, declaration) in &self.symbol_table.entries {
+            let node = self.get_node(&handle);
+            match node {
+                ASTNode::SymbolRef{.. } => (),
+                _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, DeclarationPrintable{declaration: declaration.clone(), context: self.context})}
+            }
+        }
     }
 
     fn enter_scope(&mut self, _next_param_slot: i32, _next_variable_slot: i32) -> () {
@@ -150,20 +49,18 @@ impl <'a> Analyzer<'a> {
         ()
     }
 
-    pub fn print_symbol_table(&self) -> () {
-        for (handle, declaration) in &self.symbol_table.entries {
-            let node = self.get_node(&handle);
-            match node {
-                ASTNode::SymbolRef{.. } => (),
-                _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, DeclarationPrintable{declaration: declaration.clone(), context: self.context})}
-            }
-        }
+    
+    fn report_error(&mut self, error: AnalysisError) -> () {
+        self.halt = true;
+
+        self.error_handler.print_analysis_error(error);
+        
+        ()
     }
 
 }
 
 impl <'a> Vistior<'a> for Analyzer<'a> {
-
     fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
         let node = self.get_node(node_h).clone();
         match node {
@@ -178,28 +75,28 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
             },
             ASTNode::VariableDecl { identifier, initializer: _, type_info } => {
                 // Make a new entry
-                
+                let size = self.context.resolve_type(type_info).calculate_size();
                 // Derive size from TypeInfo
                 let scope = self.curr_scope();
 
-                let size = type_info.calculate_size();
-
                 let entry = Declaration {
-                    identifier: identifier,
-                    size: size,
+                    identifier,
+                    size,
                     offset: scope.next_variable_slot * -1,
                     kind: DeclarationType::VarOrParam,
-                    type_info: type_info,
+                    type_info,
                     is_global: scope.is_global,
                 };
                 scope.next_variable_slot += size as i32;
 
                 // Need some way to error out here:
                 // How am i supposed to extract error from eresuklt?
+                              
                 match self.symbol_table.add(*node_h, entry) {
                     Err(error) => {self.report_error(error)}
                     Ok(()) => ()
-                }
+                }  
+
             },
             ASTNode::ParameterDecl { identifier, type_info } => {
                 // Make a new entry

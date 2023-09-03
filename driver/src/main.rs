@@ -1,6 +1,6 @@
 #![deny(rust_2018_idioms)]
 use std::{path::PathBuf, fs::File, io::Read, cell::RefCell, rc::Rc};
-use analysis::analysis::Analyzer;
+use analysis::{analysis::Analyzer, typecheck::Typecheck};
 use clap::{Parser, error};
 //use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
@@ -49,10 +49,11 @@ fn main() {
 
     input_file.read_to_string(&mut input_stream).unwrap();
 
-    let mut context = Context::new(&input_stream);
+    let context = Context::new(&input_stream);
+    let error_handler: ErrorHandler<'_> = ErrorHandler::new(&context);
 
-    let mut lexer: lexer::Lexer<'_, '_> = lexer::Lexer::new(&input_stream, &context);
-    let mut parser: parser::Parser<'_> = parser::Parser::new(&mut lexer, &context);
+    let mut lexer: lexer::Lexer<'_, '_> = lexer::Lexer::new(&input_stream, &context, &error_handler);
+    let parser: parser::Parser<'_> = parser::Parser::new(&mut lexer, &context, &error_handler);
 
     let ast = parser.parse();
 
@@ -62,24 +63,27 @@ fn main() {
 
     let ast = ast.unwrap();
 
+    let root =&ast.root.unwrap();
     if cli.verbose {
         let mut printer: ASTPrint<'_> = ASTPrint::new(false, &ast, &context);
-        printer.traverse(&ast.root.unwrap());
+        printer.traverse(root);
     }
 
-    /*
-    let mut analyzer: Analyzer<'_> = analysis::Analyzer::new(&ast, error_handler.clone());
+    
+    let mut analyzer: Analyzer<'_> = Analyzer::new(&ast, &context, &error_handler);
     
     // Check for analysis errors
-    analyzer.traverse(&ast.root.unwrap());
-
-    if error_handler.borrow_mut().fatal {
-        return;
-    }
+    analyzer.traverse(root);
 
     if cli.verbose {
         analyzer.print_symbol_table();
-    } */
+    } 
+
+    let mut typecheck: Typecheck<'_> = Typecheck::new(&analyzer.symbol_table, &ast, &context, &error_handler);
+
+    typecheck.traverse(root);
+
+    typecheck.print_casts();
 
     /*
 
