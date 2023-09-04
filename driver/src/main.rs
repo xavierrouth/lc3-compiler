@@ -99,3 +99,30 @@ fn main() {
     //println!("two: {:?}", cli.verbose);  */
 
 }
+
+/*
+#[cfg(test)]
+mod binary_tests {
+    use std::process::Command;
+    use std::fs;
+
+
+    #[test]
+    fn basic() {
+        let paths = fs::read_dir("../tests/").unwrap();
+        for path in paths {
+            println!("Name: {}", path.unwrap().path().display())
+        }
+
+        /*let compile = Command::new("lc3-compile")
+            .arg("in/main.c")
+            .arg("-o")
+            .arg("out/out.asm")
+            .output()
+            .unwrap_or_else(|e| {panic!("failed to compile: {e}")});
+        */
+        //let test = Command::new(lc3)
+        
+    }
+    
+} */

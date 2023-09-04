@@ -1,3 +1,6 @@
 [submodule "lc3tools"]
 	path = lc3tools
 	url = https://github.com/xavierrouth/lc3tools.git
+[submodule "csmith"]
+	path = csmith
+	url = https://github.com/csmith-project/csmith.git

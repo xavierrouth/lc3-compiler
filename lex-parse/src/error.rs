@@ -140,7 +140,7 @@ impl <'ctx> ErrorHandler<'ctx> {
                 if let Some(token) = dbg_info {
                     println!("{} {msg}", "error:".red());
                     self.print_line(token.row);
-                    self.print_arrow(token.row, token.col as i32 - 2)
+                    self.print_arrow(token.row, token.col as i32 - 1)
                 }
                 else {
                     println!("{msg}");

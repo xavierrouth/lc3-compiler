@@ -406,6 +406,9 @@ impl<'a> Parser<'a> {
 
     fn parse_if_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         self.eat_token(TokenKind::If)?;
+        if !self.expect_token(TokenKind::OpenParen) {
+            return Err(ParserError::GeneralError("Expected '(' after 'if'.".to_string(), Some(self.get_token())));
+        }
         self.eat_token(TokenKind::OpenParen)?;
         let condition = self.parse_expression(0)?;
         self.eat_token(TokenKind::CloseParen)?;
