@@ -1,16 +1,19 @@
-use lex_parse::{analysis::SymbolTable, ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType}};
-
+use ::analysis::symbol_table::SymbolTable;
+use lex_parse::{ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType}, types::StorageQual};
+use analysis::{analysis};
 use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Inst, Immediate as Imm, Label, LC3Directive};
-use lex_parse::strings::{Strings, InternedString};
+use lex_parse::context::{Context, InternedType, InternedString};
 
 pub struct Codegen<'a> {
     regfile: [bool; 8],
     global_data_addr: usize,
     user_stack_addr: usize,
+    scope: InternedString,
     symbol_table: SymbolTable,
+
     printer: &'a mut AsmPrinter, // 
     ast: &'a AST,
-    function: InternedString,
+    context: &'a Context<'a>,
 } 
 
 // TODO: Rewrite to use Register data type instead of usize
@@ -22,15 +25,8 @@ impl<'a> Codegen<'a> {
     const R6: Register = Register{value: 6};
     const R7: Register = Register{value: 7};
 
-    pub fn new(ast: &'a AST, printer: &'a mut AsmPrinter, symbol_table: SymbolTable) -> Codegen<'a> {
-        let mut lock = Strings.lock().unwrap();
-        let function = lock.get_or_intern("main");
-        Codegen { regfile: [false ; 8], global_data_addr: 0, user_stack_addr: 0, symbol_table: symbol_table, printer: printer, ast: ast, function: function  }
-    }
-
-    pub fn resolve_string(&self, string: InternedString) -> String {
-        let lock = Strings.lock().unwrap();
-        lock.resolve(string).unwrap().to_string()
+    pub fn new(ast: &'a AST, printer: &'a mut AsmPrinter, context: &'a Context<'a>, symbol_table: SymbolTable) -> Codegen<'a> {
+        Codegen { regfile: [false ; 8], global_data_addr: 0, user_stack_addr: 0, context, symbol_table, printer, ast, scope: context.get_string("global")}
     }
 
     fn get_empty_reg(&self) -> Register {
@@ -50,8 +46,6 @@ impl<'a> Codegen<'a> {
 
     fn emit_condition_node(&mut self, node_h: &ASTNodeHandle) {
         let node = self.ast.get_node(node_h);
-
-
     }
 
 
@@ -74,10 +68,10 @@ impl<'a> Codegen<'a> {
             }
             // Decls:
             ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
-                self.function = *identifier;
+                self.scope = *identifier;
 
-                let function = self.resolve_string(self.function);
-                let identifier = self.resolve_string(*identifier);
+                let function = self.context.resolve_string(self.scope);
+                let identifier = self.context.resolve_string(*identifier);
 
                 if function == "main" {
                     self.printer.inst(LC3Bundle::HeaderLabel(Label::Label(identifier.clone()), None));
@@ -120,8 +114,8 @@ impl<'a> Codegen<'a> {
             ASTNode::ParameterDecl { identifier, type_info } => {},
             ASTNode::VariableDecl { identifier, initializer, type_info } => {
 
-                let identifier = self.resolve_string(*identifier);
-                let function = self.resolve_string(self.function);
+                let identifier = self.context.resolve_string(*identifier);
+                
 
                 let entry = self.symbol_table.entries.get(*node_h).unwrap();
                 // Global Variable
@@ -137,12 +131,13 @@ impl<'a> Codegen<'a> {
                         None => 0
                     };
                     
-
                     self.printer.data(LC3Bundle::Directive(Some(Label::Label(identifier)), LC3Directive::Fill(value), None));
                     return;
                 }
+
+                let function = self.context.resolve_string(self.scope);
                 // Static Local Variable
-                else if entry.type_info.type_specifier.marked_static {
+                if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
                     let full_identifier = format!("{function}.{identifier}");   
                     // TODO: Constant evaluation of expressions
                     let value = match initializer {
@@ -186,7 +181,7 @@ impl<'a> Codegen<'a> {
             },
             ASTNode::ExpressionStmt { expression } => todo!(),
             ASTNode::ReturnStmt { expression } => {
-                let function = self.resolve_string(self.function);
+                let function = self.context.resolve_string(self.scope);
 
                 if function == "main" {
                     match expression {
@@ -255,12 +250,12 @@ impl<'a> Codegen<'a> {
                         if let ASTNode::SymbolRef { identifier } = left_node {
                             let entry = self.symbol_table.entries.get(*left).unwrap();
                             
-                            let identifier = self.resolve_string(entry.identifier);
+                            let identifier = self.context.resolve_string(entry.identifier);
 
                             // Static   
-                            if entry.type_info.type_specifier.marked_static {
+                            if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
                                 
-                                let function = self.resolve_string(self.function);
+                                let function = self.context.resolve_string(self.scope);
                                 
                                 self.printer.inst(LC3Bundle::Instruction(
                                     LC3Inst::St(reg, Label::Label(format!("{function}.{identifier}"))), Some("assign to static variable".to_string())));
@@ -389,11 +384,10 @@ impl<'a> Codegen<'a> {
                         let reg = self.get_empty_reg();
 
                         // Address of variable is just R5 + offset
-                        if entry.type_info.type_specifier.marked_static {
-                            let lock = Strings.lock().unwrap();
-                            let identifier = lock.resolve(entry.identifier).unwrap();
+                        if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
 
-                            let function_name = lock.resolve(self.function).unwrap();
+                            let identifier = self.context.resolve_string(entry.identifier);
+                            let function_name = self.context.resolve_string(self.scope);
                             
                             self.printer.inst(LC3Bundle::Instruction(LC3Inst::Lea(reg, Label::Label(format!("{}.{}", function_name, identifier)) ), 
                                 Some("load address of static variable".to_string())));
@@ -440,8 +434,7 @@ impl<'a> Codegen<'a> {
                 // Todo: Support calling arbitrary memory locations as functions.
                 let entry = self.symbol_table.entries.get(*symbol_ref).unwrap();
 
-                let lock = Strings.lock().unwrap();
-                let identifier = lock.resolve(entry.identifier).unwrap();
+                let identifier = self.context.resolve_string(entry.identifier);
 
                 // Emit jump:
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::Jsr(Label::Label(identifier.to_string())), Some("call function.".to_string())));
@@ -469,14 +462,16 @@ impl<'a> Codegen<'a> {
                 let entry = self.symbol_table.entries.get(*node_h).unwrap();
                 let reg = self.get_empty_reg();
 
+                /* */
                 // Not supporting static arrays for now.
-                if entry.type_info.is_array() {
-                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some("calculate base of array".to_string())));
-                }
-                else if entry.type_info.type_specifier.marked_static {
-                    let lock = Strings.lock().unwrap();
-                    let identifier = lock.resolve(entry.identifier).unwrap();
-                    let function_name = lock.resolve(self.function).unwrap();
+                //if entry.type_info.is_array() {
+                //    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some("calculate base of array".to_string())));
+                //}
+                
+
+                if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
+                    let identifier = self.context.resolve_string(entry.identifier);
+                    let function_name = self.context.resolve_string(self.scope);
                     
                     self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ld(reg, Label::Label(format!("{}.{}", function_name, identifier))), Some("load static variable".to_string())));
                 }

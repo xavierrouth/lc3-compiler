@@ -9,7 +9,7 @@ use crate::{types::Type, error::ErrorHandler, ast::ASTNodeHandle, token::Token};
 pub type InternedString = SymbolU16;
 
 pub struct Context<'ctx> {
-    strings: RefCell<StringInterner<StringBackend<SymbolU16>>>, 
+    strings: RefCell<StringInterner<StringBackend<InternedString>>>, 
     types: RefCell<TypeInterner>,
     tokens: RefCell<SecondaryMap<ASTNodeHandle, Token>>,
     src: &'ctx str,

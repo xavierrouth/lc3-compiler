@@ -16,13 +16,13 @@ pub struct Analyzer<'a> {
     pub symbol_table: SymbolTable, // 
     ast: &'a AST,
     halt: bool,
-    
+
     error_handler: &'a ErrorHandler<'a>,
     context: &'a Context<'a>, //TODO: Merge error handler and context.
 }
 
 impl <'a> Analyzer<'a> {
-    pub fn new(ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Analyzer<'a> {
+    pub fn new(ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>) -> Analyzer<'a> {
         Analyzer { symbol_table: SymbolTable::new(), ast, context, error_handler, halt: false}
     }
 

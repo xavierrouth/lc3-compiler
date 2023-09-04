@@ -14,7 +14,7 @@ use crate::symbol_table::SymbolTable;
 
 pub struct Typecheck<'a> {
     symbol_table: &'a SymbolTable, // 
-    ast: &'a mut AST,
+    ast: &'a AST,
 
     types: SecondaryMap<ASTNodeHandle, InternedType>,
     values: SecondaryMap<ASTNodeHandle, V>,
@@ -93,9 +93,6 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
 
 
                         match self.values.get(right).unwrap() {
-
-
-
                             V::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
                             V::RValue => ()
                         }
@@ -117,7 +114,7 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
 }
 
 impl <'a, 'ast> Typecheck<'ast> {
-    pub fn new(symbol_table: &'a SymbolTable, ast: &'a mut AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
+    pub fn new(symbol_table: &'a SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
         Typecheck { symbol_table, ast, types: SecondaryMap::new(), values: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
     }
 

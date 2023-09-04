@@ -2,5 +2,4 @@
 
 pub mod analysis;
 pub mod typecheck;
-
-mod symbol_table;
+pub mod symbol_table;

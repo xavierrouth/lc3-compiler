@@ -2,6 +2,7 @@
 use slotmap::{SlotMap, SecondaryMap};
 use std::fmt::{self, write, Display};
 use std::mem::Discriminant;
+use std::ops::Deref;
 
 use crate::context::{InternedString, Context, InternedType};
 use crate::types::{Type};
@@ -44,8 +45,16 @@ pub enum UnaryOpType {
     BinNot,
 }
 
+
 slotmap::new_key_type! { pub struct ASTNodeHandle; }
 
+impl Deref for ASTNodeHandle {
+    type Target = ASTNodeHandle;
+
+    fn deref(&self) -> &Self::Target {
+        self
+    }
+}
 // SlotMap is just an arena allocator
 pub struct AST {
     pub nodes: SlotMap<ASTNodeHandle, ASTNode>,
