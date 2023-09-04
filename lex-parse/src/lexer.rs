@@ -291,7 +291,6 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
 
 #[cfg(test)]
 mod lexer_tests {
-
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::mem;

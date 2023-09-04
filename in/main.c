@@ -1,7 +1,7 @@
 int main() {
-    int a[10];
-    int b = a;
-    int c;
-    a = b + c;
-}
+    int a;
+    int* b;
 
+    b = 10;
+    a = b;
+}

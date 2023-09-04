@@ -1,6 +1,6 @@
 #![deny(rust_2018_idioms)]
 use std::{path::PathBuf, fs::File, io::Read, cell::RefCell, rc::Rc};
-use analysis::{analysis::Analyzer, typecheck::Typecheck};
+use analysis::{analysis::Analyzer, typecheck::{Typecheck, TypedASTPrint}};
 use clap::{Parser, error};
 //use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
@@ -81,6 +81,11 @@ fn main() {
     typecheck.traverse(root);
 
     typecheck.print_casts();
+    //typecheck.print_lr();
+
+    let mut typed_printer = TypedASTPrint::new(false, &ast, &context, typecheck.types, typecheck.lr, typecheck.casts);
+
+    typed_printer.traverse(root);
 
     let mut printer = codegen::asmprinter::AsmPrinter::new();
     let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, &context, analyzer.symbol_table);

@@ -1,5 +1,6 @@
 use core::fmt;
 use std::cell::RefCell;
+use std::fmt::Display;
 use std::rc::Rc;
 
 use slotmap::{SparseSecondaryMap, SecondaryMap};
@@ -16,9 +17,9 @@ pub struct Typecheck<'a> {
     symbol_table: &'a SymbolTable, // 
     ast: &'a AST,
 
-    types: SecondaryMap<ASTNodeHandle, InternedType>,
-    values: SecondaryMap<ASTNodeHandle, V>,
-    casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>,
+    pub types: SecondaryMap<ASTNodeHandle, InternedType>,
+    pub lr: SecondaryMap<ASTNodeHandle, LR>,
+    pub casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>,
     halt: bool,
 
     context: &'a Context<'a> //TODO: Merge error handler and context.
@@ -33,18 +34,26 @@ pub enum TypeCast {
 impl fmt::Display for TypeCast {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TypeCast::ArrayToPointerDecay => write!(f, "Array to Pointer Decay"),
-            TypeCast::LvalueToRvalue => write!(f, "LValue to Rvalue"),
+            TypeCast::ArrayToPointerDecay => write!(f, "<Array to Pointer Decay>"),
+            TypeCast::LvalueToRvalue => write!(f, "<LValue to RValue>"),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum V {
+pub enum LR {
     LValue,
     RValue,
 }
 
+impl Display for LR {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LR::LValue => write!(f, "lvalue"),
+            LR::RValue => write!(f, "rvalue"),
+        }
+    }
+}
 impl <'a> Vistior<'a> for Typecheck<'a> {
     fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
         self.ast.get_node(node_h)
@@ -56,58 +65,70 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
         let value = match node {
             ASTNode::IntLiteral { value } => {
                 self.types.insert(*node_h, self.get_int_type());
-                V::RValue
+                LR::RValue
             },
-            ASTNode::FunctionCall { symbol_ref, arguments } => todo!(),
+            //ASTNode::FunctionCall { symbol_ref, arguments } => todo!(),
             ASTNode::SymbolRef { identifier } => {
                 self.try_array_decay(node_h); // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
-                V::LValue
+                LR::LValue
+            },
+            ASTNode::UnaryOp { op, child, order } => {
+                match op {
+                    UnaryOpType::Address => {
+                        // TODO: Make sure child is an Lvalue.
+                        if self.lr.get(child) != Some(&LR::LValue) {
+                            println!("NO");
+                            self.halt = true;
+                        }
+                        // This converts an L-Value to an R-Value.
+                        LR::RValue
+                    },
+                    UnaryOpType::Dereference => {
+                        // This converts R-Value to an L-Value.
+                        // Apply 
+                        // If child is not an Rvalue, then cast child to Rvalue,
+                        // treat 
+                        // Then Set output as Lvalue.
+                        // Cast child to Rvalue: 
+                        // (- load from symbol,
+                        //  - )
+                        LR::LValue
+                    },
+                    _ => {
+                        match self.lr.get(child).unwrap() {
+                            LR::LValue => {self.casts.insert(child, TypeCast::LvalueToRvalue);},
+                            LR::RValue => {},
+                        };
+                        LR::RValue
+                    }
+                }
             },
             ASTNode::BinaryOp { op, right, left } => {
                 match op {
                     BinaryOpType::Assign => {
-                        match self.values.get(right).unwrap() {
-                            V::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
-                            V::RValue => ()
+                        match self.lr.get(right).unwrap() {
+                            LR::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
+                            LR::RValue => ()
                         }
                         // Check here that Rleft is Rvalue.
                     },
                     _ => {
                         // Convert lvalues to Rvalues
-                        // Insert Cast Node
-                        // Very difficult to mutate data structure you are traversing over.
-                        /**
-                        let mut binop = self.ast.nodes.get_mut(*node_h);
-
-                        if let Some(binop) = binop.as_mut() {
-                            if let ASTNode::BinaryOp { op, right, left } = binop {
-                                // Try a cast on both left and right LOL
-                                let child = right.clone();
-                                let cast = ASTNode::UnaryOp { op: lex_parse::ast::UnaryOpType::Address, child: child, order: false };
-                                let cast = self.ast.nodes.insert(cast);
-                                *right = cast;
-                            }
-                        };  */
-
-                        //let cast = 
-
-
-                        match self.values.get(right).unwrap() {
-                            V::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
-                            V::RValue => ()
+                        match self.lr.get(right).unwrap() {
+                            LR::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
+                            LR::RValue => ()
                         }
-                        match self.values.get(left).unwrap() {
-                            V::LValue => {self.casts.insert(left, TypeCast::LvalueToRvalue);},
-                            V::RValue => ()
+                        match self.lr.get(left).unwrap() {
+                            LR::LValue => {self.casts.insert(left, TypeCast::LvalueToRvalue);},
+                            LR::RValue => ()
                         }
                     }
                 }
-                V::RValue // Unless its a array index, then you can get an Lvalue from that
-                
+                LR::RValue // Unless its a array index, then you can get an Lvalue from that
             },
-            _ => {V::RValue},
+            _ => LR::RValue,
         };
-        self.values.insert(*node_h, value);
+        self.lr.insert(*node_h, value);
     }
 
     fn halt(& self) -> bool {false}
@@ -115,7 +136,7 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
 
 impl <'a, 'ast> Typecheck<'ast> {
     pub fn new(symbol_table: &'a SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
-        Typecheck { symbol_table, ast, types: SecondaryMap::new(), values: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
+        Typecheck { symbol_table, ast, types: SecondaryMap::new(), lr: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
     }
 
     pub fn print_casts(&self) -> () {
@@ -126,6 +147,16 @@ impl <'a, 'ast> Typecheck<'ast> {
             }
         }
     } 
+
+    pub fn print_lr(&self) -> () {
+        // TODO: Make this print and annotate the AST.
+        for (handle, lr) in &self.lr {
+            let node = self.get_node(&handle);
+            match node {
+                _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, lr)}
+            }
+        }
+    }
 
     fn get_int_type(&self) -> InternedType {
         self.context.get_type(
@@ -157,3 +188,64 @@ impl <'a, 'ast> Typecheck<'ast> {
     }
 }
 
+
+pub struct TypedASTPrint<'a> {
+    pub debug_mode: bool,
+    pub depth: usize,
+    ast: &'a AST,
+    context: &'a Context<'a>,
+
+    types: SecondaryMap<ASTNodeHandle, InternedType>,
+    lr: SecondaryMap<ASTNodeHandle, LR>,
+    casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>,
+}
+
+impl <'a> TypedASTPrint<'a> {
+    pub fn new(debug_mode: bool, ast: &'a AST, context: &'a Context<'a>, 
+        types: SecondaryMap<ASTNodeHandle, InternedType>, lr: SecondaryMap<ASTNodeHandle, LR>, casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>,) -> TypedASTPrint<'a> {
+        TypedASTPrint { context, debug_mode , depth: 0, ast, types, lr, casts }
+    }
+}
+
+impl <'a> Vistior<'a> for TypedASTPrint<'a> {
+
+    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
+        self.depth += 1;
+        // TODO: Condition on debug mdoe vs pretty mode
+        let node = self.get_node(node_h);
+        let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
+
+        let type_string = match self.types.get(*node_h) {
+            Some(t) => format!("{}", self.context.resolve_type(*t)),
+            None => "".to_string(),
+        };
+
+        let lr = match self.lr.get(*node_h) {
+            Some(lr) => format!("{}", lr),
+            None => "".to_string(),
+        };
+
+        let cast = match self.casts.get(*node_h) {
+            Some(cast) => format!("{}", cast),
+            None => "".to_string(),
+        };
+
+        if self.debug_mode {
+            println!("{whitespace_string}{:?}", node)
+        }
+        else {
+            let printable = ASTNodePrintable{ node: node.clone(), context: self.context};
+            println!("{whitespace_string}{:} {type_string} {lr} {cast}", printable, );
+        }
+        
+    }
+
+    fn postorder(&mut self, _node_h: &ASTNodeHandle) -> () {
+        self.depth -= 1;
+    }
+
+    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
+        self.ast.nodes.get(*node_h).unwrap()
+    }
+    
+}

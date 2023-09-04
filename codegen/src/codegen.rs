@@ -468,7 +468,6 @@ impl<'a> Codegen<'a> {
                 //    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some("calculate base of array".to_string())));
                 //}
                 
-
                 if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
                     let identifier = self.context.resolve_string(entry.identifier);
                     let function_name = self.context.resolve_string(self.scope);

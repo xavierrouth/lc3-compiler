@@ -16,8 +16,10 @@ cp -a $TEST_DIR/lc3tools-tests/. $LC3_TOOLS_ROOT/src/test/tests/
 
 for filename in $TEST_DIR/input/*.c; do
     # Run compiler on input to get asm
+    echo lc3-compile -o $ROOT/tmp/out.asm $filename
     lc3-compile -o $ROOT/tmp/out.asm $filename
 
     # Run test on output asm
+    echo $LC3_TOOLS_ROOT/build/bin/$(basename $filename .c) $ROOT/tmp/out.asm
     $LC3_TOOLS_ROOT/build/bin/$(basename $filename .c) $ROOT/tmp/out.asm
 done
