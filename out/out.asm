@@ -11,22 +11,22 @@
     JSR main
 
 main
-    ADD R6, R6, #-1                     ; allocate space for 'a'
-    AND R0, R0, #0
-    ADD R0, R0, #15
-    STR R0, R5, #0                      ; initialize 'a'
-
-    ADD R6, R6, #-1                     ; allocate space for 'b'
-    ADD R0, R5, #0                      ; take address of 'a'
-    STR R0, R5, #-1                     ; initialize 'b'
+    ADD R6, R6, #-15                    ; allocate space for 'a'
 
     AND R0, R0, #0
-    ADD R0, R0, #3
-    LDR R1, R5, #-1                     ; load local variable 'b'
-    STR R0, R1, #0
+    ADD R0, R0, #5
+    ADD R1, R5, #-14                    ; load base of array access for 'a'
+    AND R2, R2, #0
+    ADD R2, R2, #10
+    ADD R3, R1, R2                      ; calculate index into array
+    STR R0, R3, #0
 
-    LDR R0, R5, #0                      ; load local variable 'a'
-    STI R0, RETURN_SLOT                 ; write return value from main
+    ADD R0, R5, #-14                    ; load base of array access for 'a'
+    AND R1, R1, #0
+    ADD R1, R1, #10
+    ADD R2, R0, R1                      ; calculate index into array
+    LDR R2, R2, #0                      ; load element from array
+    STI R2, RETURN_SLOT                 ; write return value from main
     HALT
 
     HALT

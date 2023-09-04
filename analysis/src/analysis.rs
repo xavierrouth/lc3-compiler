@@ -79,15 +79,17 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 // Derive size from TypeInfo
                 let scope = self.curr_scope();
 
+                scope.next_variable_slot += size as i32;
+
                 let entry = Declaration {
                     identifier,
                     size,
-                    offset: scope.next_variable_slot * -1,
+                    offset: (scope.next_variable_slot - 1) * -1,
                     kind: DeclarationType::Var,
                     type_info,
                     is_global: scope.is_global,
                 };
-                scope.next_variable_slot += size as i32;
+                
 
                 // Need some way to error out here:
                 // How am i supposed to extract error from eresuklt?

@@ -69,8 +69,8 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
             },
             //ASTNode::FunctionCall { symbol_ref, arguments } => todo!(),
             ASTNode::SymbolRef { identifier } => {
-                self.try_array_decay(node_h); // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
-                LR::LValue
+                self.try_array_decay(node_h) // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
+                //LR::LValue
             },
             ASTNode::VariableDecl { identifier, initializer, type_info } => {
                 // If there is an intiializer and initializer is not an rvalue, then cast it to an rvlaue., then, convert to 
@@ -123,7 +123,16 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                             LR::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
                             LR::RValue => ()
                         }
+                        LR::RValue 
                         // Check here that Rleft is Rvalue.
+                    },
+                    BinaryOpType::ArrayAccess => {
+                        // Unsure if this needs casting
+                        match self.lr.get(left).unwrap() {
+                            LR::LValue => {self.casts.insert(left, TypeCast::LvalueToRvalue);},
+                            LR::RValue => ()
+                        }
+                        LR::LValue
                     },
                     _ => {
                         // Convert lvalues to Rvalues
@@ -135,9 +144,11 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                             LR::LValue => {self.casts.insert(left, TypeCast::LvalueToRvalue);},
                             LR::RValue => ()
                         }
+                        LR::RValue 
                     }
+                    
                 }
-                LR::RValue // Unless its a array index, then you can get an Lvalue from that
+                // Unless its a array index, then you can get an Lvalue from that
             },
             ASTNode::ReturnStmt { expression } => {
                 if let Some(expression) = expression {
@@ -192,7 +203,7 @@ impl <'a, 'ast> Typecheck<'ast> {
         )
     }
 
-    fn try_array_decay(& mut self, node_h: &ASTNodeHandle) -> () {
+    fn try_array_decay(& mut self, node_h: &ASTNodeHandle) -> LR {
         // Assert that this is a symbol ref.
         let symbol = self.symbol_table.entries.get(*node_h).unwrap();
 
@@ -205,7 +216,11 @@ impl <'a, 'ast> Typecheck<'ast> {
 
             let r#type = self.context.get_type(&r#type);
             self.types.insert(*node_h, r#type);
+            LR::RValue
 
+        }
+        else {
+            LR::LValue
         }        
     }
 }

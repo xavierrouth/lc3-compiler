@@ -197,7 +197,7 @@ impl<'a> Codegen<'a> {
 
                 // Nonstatic local variable
                 else {
-                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), Some(format!("allocate space for '{identifier}'"))));
+                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1 * entry.size as i32)), Some(format!("allocate space for '{identifier}'"))));
                     match initializer {
                         Some(initializer) => {
                             // Need to do constant evaluation.
@@ -479,9 +479,14 @@ impl<'a> Codegen<'a> {
                         self.regfile[offset.value] = Self::USED;
 
                         let reg = self.get_empty_reg();
-                        // add offset to base, then load that
+
                         self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddReg(reg, base, offset), Some("calculate index into array".to_string())));
-                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some("load element from array".to_string())));
+
+                        // Only load if this needs to be an Rvalue, else we just want the address.
+                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some("load element from array".to_string())));
+                        }
+
 
                         self.regfile[base.value] = Self::UNUSED;
                         self.regfile[offset.value] = Self::UNUSED;
@@ -527,7 +532,7 @@ impl<'a> Codegen<'a> {
                        
                         // TBH i don't know why this works.
                         if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
-                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), None));
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some("dereference".to_string())));
                         }
                         //
                         return reg;
@@ -616,6 +621,12 @@ impl<'a> Codegen<'a> {
                                 format!("load parameter '{identifier}'"))));
                         }
                     }
+                }
+                else if self.casts.get(*node_h) == Some(&TypeCast::ArrayToPointerDecay) {
+                    let identifier = self.context.resolve_string(entry.identifier);
+                    // this is an lvalue, just generate the address
+                    self.printer.inst(Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some(
+                        format!("load base of array access for '{identifier}'"))));
                 }
                 else {
                     // This is an Lvalue, just generate the Address
