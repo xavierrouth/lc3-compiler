@@ -20,6 +20,7 @@ pub enum BinaryOpType {
     LogAnd,
     LogOr,
     BitAnd,
+    BitOr,
     LessThan,
     GreaterThan,
     LessThanEqual,

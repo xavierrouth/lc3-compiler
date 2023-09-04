@@ -1,7 +1,6 @@
 int main() {
-    int a;
-    int* b;
-
-    b = 10;
-    a = b;
+    if (2 > 1) {
+        return 3;
+    }
+    return 6;
 }

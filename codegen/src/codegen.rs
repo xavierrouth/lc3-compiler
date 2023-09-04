@@ -1,7 +1,9 @@
+use std::fmt::format;
+
 use ::analysis::symbol_table::SymbolTable;
 use lex_parse::{ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType}, types::StorageQual};
 use analysis::{analysis};
-use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Inst, Immediate as Imm, Label, LC3Directive};
+use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Bundle::*, LC3Inst, Immediate as Imm, Label, LC3Directive};
 use lex_parse::context::{Context, InternedType, InternedString};
 
 pub struct Codegen<'a> {
@@ -14,6 +16,11 @@ pub struct Codegen<'a> {
     printer: &'a mut AsmPrinter, // 
     ast: &'a AST,
     context: &'a Context<'a>,
+
+    // Random trash:
+    if_counter: usize,
+    while_counter: usize,
+    for_counter: usize,
 } 
 
 // TODO: Rewrite to use Register data type instead of usize
@@ -26,7 +33,8 @@ impl<'a> Codegen<'a> {
     const R7: Register = Register{value: 7};
 
     pub fn new(ast: &'a AST, printer: &'a mut AsmPrinter, context: &'a Context<'a>, symbol_table: SymbolTable) -> Codegen<'a> {
-        Codegen { regfile: [false ; 8], global_data_addr: 0, user_stack_addr: 0, context, symbol_table, printer, ast, scope: context.get_string("global")}
+        Codegen { regfile: [false ; 8], global_data_addr: 0, user_stack_addr: 0, context, symbol_table, printer, ast, scope: context.get_string("global"),
+        if_counter: 0, while_counter: 0, for_counter: 0}
     }
 
     fn get_empty_reg(&self) -> Register {
@@ -44,8 +52,35 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn emit_condition_node(&mut self, node_h: &ASTNodeHandle) {
+    fn emit_condition_node(&mut self, node_h: &ASTNodeHandle) -> Register {
         let node = self.ast.get_node(node_h);
+
+        let (op, left, right) = match node {
+            ASTNode::BinaryOp{op, left, right} => (op, left, right),
+            _ => panic!()
+        };
+
+        let right = self.emit_expression_node(right);
+        self.regfile[right.value] = Codegen::USED;
+        let left = self.emit_expression_node(left);
+
+        let ret = left;
+
+        match op {
+            BinaryOpType::LessThan => {
+                self.printer.inst(Instruction(LC3Inst::Not(left, left), Some("evaluate '<'".to_string())));
+                self.printer.inst(Instruction(LC3Inst::AddImm(left, left, Imm::Int(1)), None));
+                self.printer.inst(Instruction(LC3Inst::AddReg(ret, left, right), None));
+            },
+            BinaryOpType::GreaterThan => {
+                self.printer.inst(Instruction(LC3Inst::Not(right, right), Some("evaluate '>'".to_string())));
+                self.printer.inst(Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
+                self.printer.inst(Instruction(LC3Inst::AddReg(ret, left, right), None));
+            },
+            _ => panic!()
+        }
+
+        return ret;
     }
 
 
@@ -188,6 +223,7 @@ impl<'a> Codegen<'a> {
                         Some(expression) => {
                             let reg = self.emit_expression_node(expression);
                             self.printer.inst(LC3Bundle::Instruction(LC3Inst::Sti(reg, Label::Label("RETURN_SLOT".to_string())), Some("write return value from main".to_string())));
+                            self.printer.inst(Instruction(LC3Inst::Halt, None));
                         },
                         None =>  ()
                     }
@@ -213,10 +249,46 @@ impl<'a> Codegen<'a> {
             /**
             ASTNode::ForStmt { initializer, condition, update, body } => todo!(),
             ASTNode::WhileStmt { condition, body } => todo!(),
-            ASTNode::IfStmt { condition, if_branch, else_branch } => todo!(),
+            
             ASTNode::DeclStmt { declarations } => todo!(),
             ASTNode::InlineAsm { assembly } => todo!(),
              */
+            ASTNode::IfStmt { condition, if_branch, else_branch } => {
+                // TOOD: If this is a simple condition, then we don't need to load the condition into NZP.
+                let condition = self.emit_expression_node(condition);
+                self.printer.inst(Newline);
+                self.printer.inst(Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
+
+                let func_name = self.context.resolve_string(self.scope);
+
+                let name = format!("{func_name}.if.{}", self.if_counter);
+                let label_header = Label::Label(format!("{name}"));
+                let label_end = Label::Label(format!("{name}.end"));
+                let label_else: Label = Label::Label(format!("{name}.else"));
+
+                match else_branch {
+                    Some(else_branch) => {
+                        self.printer.inst(Instruction(LC3Inst::Br(true, true, false, label_else.clone()), Some("if false, jump to else block".to_string())));
+                        self.printer.inst(Newline);
+                        self.emit_ast_node(if_branch);
+
+                        self.printer.inst(Instruction(LC3Inst::Br(true, true, true, label_end.clone()), None));
+                        self.printer.inst(HeaderLabel(label_else, None));
+                        self.printer.inst(Newline);
+
+                        self.emit_ast_node(else_branch);
+                        self.printer.inst(HeaderLabel(label_end, None));
+                    }
+                    None => {
+                        self.printer.inst(Instruction(LC3Inst::Br(true, true, false, label_end.clone()), Some("if false, jump over if statement".to_string())));
+                        self.printer.inst(Newline);
+                        self.emit_ast_node(if_branch);
+                        self.printer.inst(HeaderLabel(label_end, None));
+                    }
+                }
+
+                self.if_counter += 1;
+            }
 
             // Expressions:
             ASTNode::IntLiteral { value } => {self.emit_expression_node(node_h); ()},
@@ -225,7 +297,7 @@ impl<'a> Codegen<'a> {
             ASTNode::BinaryOp { op, right, left } => {self.emit_expression_node(node_h); ()},
             ASTNode::UnaryOp { op, child, order } => {self.emit_expression_node(node_h); ()},
             _ => {
-                println!()
+                println!("Unimplemeneted.")
             }    
         }
         
@@ -338,17 +410,18 @@ impl<'a> Codegen<'a> {
                     BinaryOpType::Mul => todo!(),
                     BinaryOpType::Div => todo!(),
                     BinaryOpType::Mod => todo!(),
+                    BinaryOpType::BitAnd => todo!(),
+                    BinaryOpType::BitOr => todo!(),
 
                     // Conditionals
-                    BinaryOpType::LogAnd => todo!(),
-                    BinaryOpType::LogOr => todo!(),
-                    BinaryOpType::BitAnd => todo!(),
-                    BinaryOpType::LessThan => todo!(),
-                    BinaryOpType::GreaterThan => todo!(),
-                    BinaryOpType::LessThanEqual => todo!(),
-                    BinaryOpType::GreaterThanEqual => todo!(),
-                    BinaryOpType::NotEqual => todo!(),
-                    BinaryOpType::EqualEqual => todo!(),
+                    BinaryOpType::LogAnd |
+                    BinaryOpType::LogOr |
+                    BinaryOpType::LessThan |
+                    BinaryOpType::GreaterThan |
+                    BinaryOpType::LessThanEqual |
+                    BinaryOpType::GreaterThanEqual |
+                    BinaryOpType::NotEqual |
+                    BinaryOpType::EqualEqual => return self.emit_condition_node(node_h),
 
                     // Pointer Access
                     BinaryOpType::ArrayAccess => {
@@ -483,6 +556,5 @@ impl<'a> Codegen<'a> {
             }
             _ => todo!()
         }
-        todo!()
     }
 }

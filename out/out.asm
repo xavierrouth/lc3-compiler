@@ -11,18 +11,26 @@
     JSR main
 
 main
-    ADD R6, R6, #-1                     ; allocate space for 'a'
+    AND R0, R0, #0
+    ADD R0, R0, #1
+    AND R1, R1, #0
+    ADD R1, R1, #2
+    NOT R0, R0                          ; evaluate '>'
+    ADD R0, R0, #1
+    ADD R1, R1, R0
 
-    ADD R6, R6, #-1                     ; allocate space for 'b'
+    AND R1, R1, R1                      ; load condition into NZP
+    BRnz main.if.0.end                  ; if false, jump over if statement
+
+    AND R1, R1, #0
+    ADD R1, R1, #3
+    STI R1, RETURN_SLOT                 ; write return value from main
+
+main.if.0.end
 
     AND R0, R0, #0
-    ADD R0, R0, #10
-    STR R0, R5, #-1                     ; assign to variable b
-    LDR R1, R5, #-1                     ; load local variable or parameter
-
-    LDR R0, R5, #-1                     ; load local variable or parameter
-    STR R0, R5, #0                      ; assign to variable a
-    LDR R1, R5, #0                      ; load local variable or parameter
+    ADD R0, R0, #6
+    STI R0, RETURN_SLOT                 ; write return value from main
 
     HALT
 

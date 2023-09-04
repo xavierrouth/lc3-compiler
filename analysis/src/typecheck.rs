@@ -50,7 +50,7 @@ impl Display for LR {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LR::LValue => write!(f, "lvalue"),
-            LR::RValue => write!(f, "rvalue"),
+            LR::RValue => write!(f, ""),//write!(f, "rvalue"),
         }
     }
 }
@@ -72,6 +72,16 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                 self.try_array_decay(node_h); // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
                 LR::LValue
             },
+            ASTNode::VariableDecl { identifier, initializer, type_info } => {
+                // If there is an intiializer and initializer is not an rvalue, then cast it to an rvlaue., then, convert to 
+                if let Some(initializer) = initializer {
+                    match self.lr.get(initializer).unwrap() {
+                        LR::LValue => {self.casts.insert(initializer, TypeCast::LvalueToRvalue);},
+                        LR::RValue => {},
+                    };
+                }
+                LR::RValue
+            }
             ASTNode::UnaryOp { op, child, order } => {
                 match op {
                     UnaryOpType::Address => {
@@ -87,7 +97,10 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                         // This converts R-Value to an L-Value.
                         // Apply 
                         // If child is not an Rvalue, then cast child to Rvalue,
-                        // treat 
+                        match self.lr.get(child).unwrap() {
+                            LR::LValue => {self.casts.insert(child, TypeCast::LvalueToRvalue);},
+                            LR::RValue => {},
+                        };
                         // Then Set output as Lvalue.
                         // Cast child to Rvalue: 
                         // (- load from symbol,

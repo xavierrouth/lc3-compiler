@@ -80,12 +80,10 @@ fn main() {
 
     typecheck.traverse(root);
 
-    typecheck.print_casts();
-    //typecheck.print_lr();
-
-    let mut typed_printer = TypedASTPrint::new(false, &ast, &context, typecheck.types, typecheck.lr, typecheck.casts);
-
-    typed_printer.traverse(root);
+    if cli.verbose {
+        let mut typed_printer = TypedASTPrint::new(false, &ast, &context, typecheck.types, typecheck.lr, typecheck.casts);
+        typed_printer.traverse(root);
+    };
 
     let mut printer = codegen::asmprinter::AsmPrinter::new();
     let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, &context, analyzer.symbol_table);
