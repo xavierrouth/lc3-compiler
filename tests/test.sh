@@ -23,3 +23,7 @@ for filename in $TEST_DIR/input/*.c; do
     echo $LC3_TOOLS_ROOT/build/bin/$(basename $filename .c) $ROOT/tmp/out.asm
     $LC3_TOOLS_ROOT/build/bin/$(basename $filename .c) $ROOT/tmp/out.asm
 done
+
+
+# CSMITH COMMAND:
+# csmith --no-argc --no-arrays --no-bitfields --no-checksum --no-comma-operators --no-compound-assignment --no-consts --no-divs --no-embedded-assigns --no-pre-incr-operator --no-pre-decr-operator --no-post-incr-operator --no-post-decr-operator --no-jumps --no-longlong --no-int8 --no-uint8 --no-float --no-math64 --no-inline-function --no-muls --no-packed-struct --no-pointers --no-structs --no-unions --no-volatiles --no-const-pointers --no-global-variables --no-builtins

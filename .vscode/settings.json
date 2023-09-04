@@ -5,6 +5,6 @@
         "./analysis/Cargo.toml"
     ],
     "terminal.integrated.env.linux": {
-        "PATH" : "${env:PATH}:${workspaceFolder}/target/release"
+        "PATH" : "${env:PATH}:${workspaceFolder}/target/release:${workspaceFolder}/csmith/build/bin"
     },
 }
