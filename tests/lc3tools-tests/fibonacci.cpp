@@ -23,7 +23,7 @@ void testBringup(lc3::sim & sim) { }
 void testTeardown(lc3::sim & sim) { }
 
 void setup(Tester & tester) { 
-    tester.registerTest("Fibonacci Test", FibonacciTest, 1, false);
+    tester.registerTest("fibonacci", FibonacciTest, 1, false);
 }
 
 void shutdown(void) { }

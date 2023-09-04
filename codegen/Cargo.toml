@@ -9,3 +9,4 @@ edition = "2021"
 [dependencies]
 lex-parse = { path = "../lex-parse" }
 analysis = { path = "../analysis" }
+slotmap = "1.0"

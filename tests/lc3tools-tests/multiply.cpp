@@ -14,7 +14,7 @@ void testBringup(lc3::sim & sim) { }
 void testTeardown(lc3::sim & sim) { }
 
 void setup(Tester & tester) { 
-    tester.registerTest("Multiplication Test", MultiplicationTest, 1, false);
+    tester.registerTest("multiply", MultiplicationTest, 1, false);
 }
 
 void shutdown(void) { }

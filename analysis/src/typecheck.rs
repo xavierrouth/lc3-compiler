@@ -139,6 +139,15 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                 }
                 LR::RValue // Unless its a array index, then you can get an Lvalue from that
             },
+            ASTNode::ReturnStmt { expression } => {
+                if let Some(expression) = expression {
+                    match self.lr.get(expression).unwrap() {
+                        LR::LValue => {self.casts.insert(expression, TypeCast::LvalueToRvalue);},
+                        LR::RValue => ()
+                    }
+                }
+                LR::RValue // This shouldn't matter
+            }
             _ => LR::RValue,
         };
         self.lr.insert(*node_h, value);

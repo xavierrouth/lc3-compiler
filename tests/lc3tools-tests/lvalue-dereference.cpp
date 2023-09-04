@@ -15,7 +15,7 @@ void testBringup(lc3::sim & sim) { }
 void testTeardown(lc3::sim & sim) { }
 
 void setup(Tester & tester) { 
-    tester.registerTest("Dereference Test", DereferenceTest, 1, false);
+    tester.registerTest("lvalue-dereference", DereferenceTest, 1, false);
 }
 
 void shutdown(void) { }

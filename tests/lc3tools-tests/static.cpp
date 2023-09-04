@@ -27,7 +27,7 @@ void testBringup(lc3::sim & sim) { }
 void testTeardown(lc3::sim & sim) { }
 
 void setup(Tester & tester) { 
-    tester.registerTest("Static Test", StaticTest, 1, false);
+    tester.registerTest("static-accumulate", StaticTest, 1, false);
 }
 
 void shutdown(void) { }

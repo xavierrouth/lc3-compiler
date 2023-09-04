@@ -13,14 +13,19 @@
 main
     ADD R6, R6, #-1                     ; allocate space for 'a'
     AND R0, R0, #0
-    ADD R0, R0, #1234234
-    AND R1, R1, #0
-    ADD R1, R1, #120
-    ADD R0, R0, R1
+    ADD R0, R0, #15
     STR R0, R5, #0                      ; initialize 'a'
 
+    ADD R6, R6, #-1                     ; allocate space for 'b'
+    ADD R0, R5, #0                      ; take address of 'a'
+    STR R0, R5, #-1                     ; initialize 'b'
+
     AND R0, R0, #0
-    ADD R0, R0, #6
+    ADD R0, R0, #3
+    LDR R1, R5, #-1                     ; load local variable 'b'
+    STR R0, R1, #0
+
+    LDR R0, R5, #0                      ; load local variable 'a'
     STI R0, RETURN_SLOT                 ; write return value from main
     HALT
 
