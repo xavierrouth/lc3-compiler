@@ -15,7 +15,7 @@ void testBringup(lc3::sim & sim) { }
 void testTeardown(lc3::sim & sim) { }
 
 void setup(Tester & tester) { 
-    tester.registerTest("Return Test", ReturnTest, 1, false);
+    tester.registerTest("return", ReturnTest, 1, false);
 }
 
 void shutdown(void) { }

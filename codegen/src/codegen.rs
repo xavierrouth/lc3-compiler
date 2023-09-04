@@ -1,21 +1,28 @@
 use std::fmt::format;
+use slotmap::{SparseSecondaryMap};
 
-use ::analysis::symbol_table::SymbolTable;
+use ::analysis::{symbol_table::{SymbolTable, DeclarationType}, typecheck::TypeCast};
 use lex_parse::{ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType}, types::StorageQual};
 use analysis::{analysis};
 use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Bundle::*, LC3Inst, Immediate as Imm, Label, LC3Directive};
 use lex_parse::context::{Context, InternedType, InternedString};
 
+
 pub struct Codegen<'a> {
+    // State
     regfile: [bool; 8],
     global_data_addr: usize,
     user_stack_addr: usize,
     scope: InternedString,
+
+    // External Information
     symbol_table: SymbolTable,
+
 
     printer: &'a mut AsmPrinter, // 
     ast: &'a AST,
     context: &'a Context<'a>,
+    casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>,
 
     // Random trash:
     if_counter: usize,
@@ -32,8 +39,8 @@ impl<'a> Codegen<'a> {
     const R6: Register = Register{value: 6};
     const R7: Register = Register{value: 7};
 
-    pub fn new(ast: &'a AST, printer: &'a mut AsmPrinter, context: &'a Context<'a>, symbol_table: SymbolTable) -> Codegen<'a> {
-        Codegen { regfile: [false ; 8], global_data_addr: 0, user_stack_addr: 0, context, symbol_table, printer, ast, scope: context.get_string("global"),
+    pub fn new(ast: &'a AST, printer: &'a mut AsmPrinter, context: &'a Context<'a>, symbol_table: SymbolTable, casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>) -> Codegen<'a> {
+        Codegen { regfile: [false ; 8], global_data_addr: 0, user_stack_addr: 0, context, symbol_table, printer, ast, casts, scope: context.get_string("global"),
         if_counter: 0, while_counter: 0, for_counter: 0}
     }
 
@@ -315,8 +322,49 @@ impl<'a> Codegen<'a> {
                 match op {
                     // Lots of annoying stuff here, be prepared
                     BinaryOpType::Assign => {
+
+                        // Handle RHS first:
+                        let rhs = self.emit_expression_node(right);
+                        self.regfile[rhs.value] = Self::USED;
+
+                        // Handle LHS now
+                        
+                        // OPTIMIZATION:
+                        if let ASTNode::SymbolRef { identifier } = left_node {
+                            let entry = self.symbol_table.entries.get(*left).unwrap();
+                            
+                            let identifier = self.context.resolve_string(entry.identifier);
+
+                            // Static   
+                            if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
+                                
+                                let function = self.context.resolve_string(self.scope);
+                                
+                                self.printer.inst(LC3Bundle::Instruction(
+                                    LC3Inst::St(rhs, Label::Label(format!("{function}.{identifier}"))), Some("assign to static variable".to_string())));
+                            } // Normal
+                            else {
+                                self.printer.inst(LC3Bundle::Instruction(
+                                    LC3Inst::Str(rhs, Self::R5, Imm::Int(entry.offset)), Some(format!("assign to variable {identifier}"))));
+                            }
+                        }
+                        else {
+                            // In general, lhs should evaluate to an adrress.
+                            let lhs = self.emit_expression_node(left);
+                            // Treat LHS as address
+                            self.printer.inst(Instruction(
+                                LC3Inst::Str(rhs, lhs, Imm::Int(0)), None)); // Store RHS into LHS as address
+                        }
+                        
+                        rhs
+                        
+                        // 
+
+                        // Load 
+                        /*
                         let reg = self.emit_expression_node(right);
                         self.regfile[reg.value] = Self::USED;
+                        
                         
                         // If the left is a simple symbol,
                         if let ASTNode::SymbolRef { identifier } = left_node {
@@ -347,11 +395,11 @@ impl<'a> Codegen<'a> {
                                 
                                 return reg;
                             }
-                        }
-                        
-                        // Anything else, treat left side as a memory address.
+                        }  */
+                        /*                        // Anything else, treat left side as a memory address.
                         let addr = self.emit_expression_node(left);
-                        return reg;
+                        return reg;  */
+
                     }
                     BinaryOpType::Add => {
                         if let ASTNode::IntLiteral { value } = left_node {
@@ -455,25 +503,33 @@ impl<'a> Codegen<'a> {
                         // Assert that it is an lvalue. (semant checks this)
                         let entry = self.symbol_table.entries.get(*child).unwrap();
                         let reg = self.get_empty_reg();
+                        let identifier = self.context.resolve_string(entry.identifier);
 
                         // Address of variable is just R5 + offset
                         if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
 
-                            let identifier = self.context.resolve_string(entry.identifier);
+                            
                             let function_name = self.context.resolve_string(self.scope);
                             
                             self.printer.inst(LC3Bundle::Instruction(LC3Inst::Lea(reg, Label::Label(format!("{}.{}", function_name, identifier)) ), 
                                 Some("load address of static variable".to_string())));
                         }
                         else {
-                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some("take address of variable".to_string())));
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), 
+                                Some(format!("take address of '{identifier}'"))));
                         }
                         return reg;
                     }
-                    UnaryOpType::Dereference => {
+                    UnaryOpType::Dereference => { // Dereference alwqasy results in an L-value.
                         // Treat whatever is being dereferenced as a memory address, and just load from the address.
+                        
                         let reg = self.emit_expression_node(child);
-                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), None));
+                       
+                        // TBH i don't know why this works.
+                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), None));
+                        }
+                        //
                         return reg;
                     }
                     UnaryOpType::Negate => {
@@ -535,24 +591,40 @@ impl<'a> Codegen<'a> {
                 let entry = self.symbol_table.entries.get(*node_h).unwrap();
                 let reg = self.get_empty_reg();
 
-                /* */
-                // Not supporting static arrays for now.
-                //if entry.type_info.is_array() {
-                //    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some("calculate base of array".to_string())));
-                //}
-                
-                if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
+                if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
                     let identifier = self.context.resolve_string(entry.identifier);
-                    let function_name = self.context.resolve_string(self.scope);
                     
-                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ld(reg, Label::Label(format!("{}.{}", function_name, identifier))), Some("load static variable".to_string())));
+                    /* */
+                    // Not supporting static arrays for now.
+                    //if entry.type_info.is_array() {
+                    //    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some("calculate base of array".to_string())));
+                    //}
+                    
+                    if self.context.resolve_type(entry.type_info).specifier.qualifiers.storage == StorageQual::Static {
+                        
+                        let function_name = self.context.resolve_string(self.scope);
+                        
+                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ld(reg, Label::Label(format!("{}.{}", function_name, identifier))), Some("load static variable".to_string())));
+                    }
+                    else {
+                        if entry.kind == DeclarationType::Var {
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, Self::R5, Imm::Int(entry.offset)), Some(
+                                format!("load local variable '{identifier}'"))));
+                        }
+                        else {
+                            self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, Self::R5, Imm::Int(entry.offset)), Some(
+                                format!("load parameter '{identifier}'"))));
+                        }
+                    }
                 }
                 else {
-                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, Self::R5, Imm::Int(entry.offset)), Some("load local variable or parameter".to_string())));
+                    // This is an Lvalue, just generate the Address
+                    self.printer.inst(Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), None));
+
                 }
                 self.regfile[reg.value] = Self::USED;
-
-                return reg;
+                    return reg;
+                
             }
             _ => todo!()
         }

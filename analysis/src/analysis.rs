@@ -83,7 +83,7 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     identifier,
                     size,
                     offset: scope.next_variable_slot * -1,
-                    kind: DeclarationType::VarOrParam,
+                    kind: DeclarationType::Var,
                     type_info,
                     is_global: scope.is_global,
                 };
@@ -108,7 +108,7 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     identifier: identifier,
                     size: 1,
                     offset: scope.next_param_slot + 4,
-                    kind: DeclarationType::VarOrParam,
+                    kind: DeclarationType::Param,
                     type_info: type_info,
                     is_global: false,
                 };
@@ -154,7 +154,7 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 }
 
                 // Make sure that it exists, and then map this node to the existing entry.
-                let entry = self.symbol_table.search_up(&identifier, &DeclarationType::VarOrParam);
+                let entry = self.symbol_table.search_up(&identifier, &DeclarationType::Var);
                 if entry.is_none() {
                     let error = AnalysisError::UnknownSymbol(identifier, *node_h);
                     self.report_error(error);

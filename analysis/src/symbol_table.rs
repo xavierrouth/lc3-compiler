@@ -27,7 +27,8 @@ impl STScope {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DeclarationType {
-    VarOrParam,
+    Var, // These are the same for scoping reasons?
+    Param,
     Function,
     Tag,
     Label,
@@ -40,7 +41,7 @@ pub struct Declaration {
     pub offset: i32,
     pub type_info: InternedType,
     pub is_global: bool,
-    pub(crate) kind: DeclarationType
+    pub kind: DeclarationType
 } 
 
 pub(crate) struct DeclarationPrintable<'a> {
@@ -81,19 +82,25 @@ impl SymbolTable {
     } 
 
     pub fn search_up(&mut self, identifier: &InternedString, entry_type: &DeclarationType) -> Option<Declaration> {
-        // TODO: Make entry types match.
         let entry = self.search_scope(&identifier, &entry_type);
 
         for scope in self.stack.iter().rev(){
             for entry in scope.var_entries.as_slice() {
-                if (entry.identifier == *identifier) && (*entry_type == entry.kind) {
-                    return Some(entry.clone())
+                if *entry_type == DeclarationType::Var || *entry_type == DeclarationType::Param {
+                    if (entry.identifier == *identifier) && (entry.kind == DeclarationType::Var || entry.kind == DeclarationType::Param) {
+                        return Some(entry.clone())
+                    }
                 }
-                
+                else {
+                    if entry.identifier == *identifier && entry.kind == *entry_type {
+                        return Some(entry.clone())
+                    }
+                }
             }
         }
         entry
     }
+
 
     pub fn add(&mut self, node: ASTNodeHandle, entry: Declaration) -> Result<(), AnalysisError> {
         if self.search_scope(&entry.identifier, &entry.kind).is_some() {
