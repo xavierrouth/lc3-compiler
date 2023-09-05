@@ -11,17 +11,17 @@
     JSR main
 
 main
-    ADD R6, R6, #-15                    ; allocate space for 'a'
+    ADD R6, R6, #-10                    ; allocate space for 'a'
 
     AND R0, R0, #0
     ADD R0, R0, #5
-    ADD R1, R5, #-14                    ; load base of array access for 'a'
+    ADD R1, R5, #-9                     ; load base of array access for 'a'
     AND R2, R2, #0
     ADD R2, R2, #10
     ADD R3, R1, R2                      ; calculate index into array
     STR R0, R3, #0
 
-    ADD R0, R5, #-14                    ; load base of array access for 'a'
+    ADD R0, R5, #-9                     ; load base of array access for 'a'
     AND R1, R1, #0
     ADD R1, R1, #10
     ADD R2, R0, R1                      ; calculate index into array

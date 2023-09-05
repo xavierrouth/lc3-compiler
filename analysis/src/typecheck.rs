@@ -8,7 +8,7 @@ use slotmap::{SparseSecondaryMap, SecondaryMap};
 use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, BinaryOpType, ASTNodePrintable, UnaryOpType};
 use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{Context, InternedType, InternedString};
-use lex_parse::types::{Type, DeclaratorPart, TypeSpecifier, StorageQual, Qualifiers, CType};
+use lex_parse::types::{Type, DeclaratorPart, TypeSpecifier, StorageQual, Qualifiers, CType, TypePrintable};
 
 use crate::symbol_table::SymbolTable;
 
@@ -197,7 +197,7 @@ impl <'a, 'ast> Typecheck<'ast> {
                 declarator: Vec::new(),
                 specifier: TypeSpecifier {
                     qualifiers: Qualifiers { cv: None, storage: StorageQual::Auto},
-                    ctype: Some(CType::Int)
+                    ctype: Some(CType::Int),
                 }
             }
         )
@@ -253,7 +253,7 @@ impl <'a> Vistior<'a> for TypedASTPrint<'a> {
         let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
 
         let type_string = match self.types.get(*node_h) {
-            Some(t) => format!("{}", self.context.resolve_type(*t)),
+            Some(t) => format!("{}", TypePrintable{data: self.context.resolve_type(*t), context: self.context}),
             None => "".to_string(),
         };
 

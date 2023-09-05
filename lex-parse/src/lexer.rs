@@ -161,6 +161,7 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
                     "while" => Ok(TokenKind::While),
                     "do" => Ok(TokenKind::Do),
                     "const" => Ok(TokenKind::Const),
+                    "struct" => Ok(TokenKind::Struct),
                     // TODO:
                     _  => Ok(TokenKind::Identifier(string))
                 }

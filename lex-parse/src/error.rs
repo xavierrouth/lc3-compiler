@@ -100,7 +100,7 @@ impl <'ctx> ErrorHandler<'ctx> {
                 let n = token.row + 1;
                 length += successors(Some(n), |&n| (n >= 10).then(|| n / 10)).count(); // Number of spaces this int takes up.
 
-                println!("{}{}", get_whitespace(length + token.col - 2), "^".green());
+                println!("{}{}", get_whitespace(length + token.col - 1), "^".green());
             },
             AnalysisError::General(_) => todo!(),
         }

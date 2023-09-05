@@ -3,6 +3,9 @@ use std::error;
 use std::fmt;
 use std::rc::Rc;
 
+use string_interner::Symbol;
+
+use crate::ast::RecordType;
 use crate::error::{ErrorHandler, ParserError};
 
 use crate::context::{InternedString, InternedType, TypeInterner, Context};
@@ -118,10 +121,58 @@ impl<'a> Parser<'a> {
         let node = ASTNode::Program { declarations: (body) };
         Ok(self.ast.nodes.insert(node))
     }
+
+    fn parse_struct_declaration(&mut self, identifier: InternedString) -> Result<ASTNodeHandle, ParserError> {
+
+        self.eat_token(TokenKind::OpenBrace)?;
+        let mut fields: Vec<ASTNodeHandle> = Vec::new();
+
+        while (true) {
+            if self.expect_token(TokenKind::CloseBrace) {
+                break;
+            }
+
+            let specifier = self.parse_declaration_specifiers()?;
+            let (declarator, field_name) = self.parse_declarator(false, true)?;
+
+            let field_name = match field_name {
+                Some(field_name) => field_name,
+                None => {return Err(ParserError::GeneralError("Missing identifier in struct field declaration.".to_string(), Some(self.prev_token())));}
+            };
+
+            let type_info = self.context.get_type( &Type {
+                declarator,
+                specifier,
+            });
+
+            let field = ASTNode::FieldDecl {identifier: field_name, type_info};
+            let field = self.ast.nodes.insert(field);
+
+            self.context.map_token(field, self.prev_token());
+
+            fields.push(field);
+
+            if !self.expect_token(TokenKind::Semicolon)  {
+                break;
+            }
+            self.eat_token(TokenKind::Semicolon)?;
+        }
+
+        self.eat_token(TokenKind::CloseBrace)?;
+        self.eat_token(TokenKind::Semicolon)?;
+
+        let node = ASTNode::RecordDecl { identifier, record_type: RecordType::Struct, fields, };
+        return Ok(self.ast.nodes.insert(node));
+
+    }
     
     fn parse_toplevel_decl(&mut self) -> Result<ASTNodeHandle, ParserError> {
 
         let specifier = self.parse_declaration_specifiers()?;
+
+        if let Some(CType::Struct( identifier)) = specifier.ctype {
+            return self.parse_struct_declaration(identifier);
+        }
 
         let (declarator, identifier) = self.parse_declarator(false, true)?;
         
@@ -163,6 +214,17 @@ impl<'a> Parser<'a> {
             TokenKind::Char => specifier.ctype = Some(CType::Char),
             TokenKind::Static => specifier.qualifiers.storage = StorageQual::Static,
             TokenKind::Const => specifier.qualifiers.cv = Some(CVQual::Const),
+            TokenKind::Struct => {
+                self.get_token();
+                if let TokenKind::Identifier(tag) = self.peek_token().kind {
+                    specifier.ctype = Some(CType::Struct(tag));
+                    self.get_token();
+                    // Messed up that this doesn't consume the identifier token.
+                    return Ok(true);
+                } else {
+                    return Err(ParserError::GeneralError("Missing identifier in struct declaration.".to_string(), Some(self.prev_token())));
+                }
+            }
             _ => {return Ok(false);}
         }
         self.get_token();
@@ -359,27 +421,48 @@ impl<'a> Parser<'a> {
                 // Parse type information
                 let specifier = self.parse_declaration_specifiers()?;
 
-                if specifier.ctype == Some(CType::Int) || specifier.ctype == Some(CType::Char) {
-                    match self.parse_declarator(false, true)? {
-                        (declarator, None) => {
-                            let tok = self.peek_token();
-                            return Err(ParserError::MissingDeclarator(tok))
-                        },
-                        (declarator, Some(identifier)) => {
-
-                            let type_info = self.context.get_type(&Type {
-                                declarator,
-                                specifier,
-                            });  
-
-                            self.parse_declaration(type_info, identifier)
+                match specifier.ctype {
+                    Some(CType::Int) |
+                    Some(CType::Char) => {
+                        match self.parse_declarator(false, true)? {
+                            (declarator, None) => {
+                                let tok = self.peek_token();
+                                return Err(ParserError::MissingDeclarator(tok))
+                            },
+                            (declarator, Some(identifier)) => {
+    
+                                let type_info = self.context.get_type(&Type {
+                                    declarator,
+                                    specifier,
+                                });  
+    
+                                return self.parse_declaration(type_info, identifier);
+                            }
                         }
                     }
-                }
-                else {
-                    let stmt = self.parse_expression(0)?;
-                    self.eat_token(TokenKind::Semicolon)?;
-                    Ok(stmt)
+
+                    Some(CType::Struct(tag)) => {
+                        match self.parse_declarator(false, true)? {
+                            (declarator, None) => {
+                                let tok = self.peek_token();
+                                return Err(ParserError::MissingDeclarator(tok))
+                            },
+                            (declarator, Some(identifier)) => {
+    
+                                let type_info = self.context.get_type(&Type {
+                                    declarator,
+                                    specifier,
+                                });  
+    
+                                return self.parse_declaration(type_info, identifier);
+                            }
+                        }
+                    }
+                    _ => {
+                        let stmt = self.parse_expression(0)?;
+                        self.eat_token(TokenKind::Semicolon)?;
+                        Ok(stmt)
+                    }
                 }
             }
         }
@@ -514,10 +597,6 @@ impl<'a> Parser<'a> {
         
     }
 
-    fn parse_struct(&mut self) -> Result<ASTNodeHandle, ParserError> {
-        todo!()
-    }
-
     // Pratt Parsing
     fn parse_expression(&mut self, binding_power: u8) -> Result<ASTNodeHandle, ParserError> {
         let mut lhs: ASTNodeHandle = match self.peek_token().kind {
@@ -620,6 +699,8 @@ impl<'a> Parser<'a> {
                 let rhs = self.parse_expression(r_bp)?;
 
                 let op: BinaryOpType = match token.kind {
+                    TokenKind::Dot => BinaryOpType::DotAccess,
+                    TokenKind::Arrow => BinaryOpType::PointerAccess,
                     TokenKind::Plus => BinaryOpType::Add, 
                     TokenKind::Minus => BinaryOpType::Sub,
                     TokenKind::Star => BinaryOpType::Mul,  

@@ -61,6 +61,7 @@ impl <'a> Analyzer<'a> {
 }
 
 impl <'a> Vistior<'a> for Analyzer<'a> {
+    // TODO: Should this really be in preorder??
     fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
         let node = self.get_node(node_h).clone();
         match node {
@@ -72,6 +73,13 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     // TODO: Distinguish between scopes / stack frames?
                     self.enter_scope(next_param_slot, next_variable_slot);
                 }
+            },
+            ASTNode::RecordDecl { identifier, record_type, fields } => {
+                self.enter_scope(0, 0); // 'use variable slot as places for struct members'
+                // Start generating a record Decl.
+            },
+            ASTNode::FieldDecl { identifier, type_info } => {
+
             },
             ASTNode::VariableDecl { identifier, initializer: _, type_info } => {
                 // Make a new entry
