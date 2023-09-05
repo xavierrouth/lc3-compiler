@@ -8,6 +8,7 @@ use crate::{types::Type, error::ErrorHandler, ast::ASTNodeHandle, token::Token};
 
 pub type InternedString = SymbolU16;
 
+#[derive(Debug)]
 pub struct Context<'ctx> {
     strings: RefCell<StringInterner<StringBackend<InternedString>>>, 
     types: RefCell<TypeInterner>,
@@ -55,6 +56,7 @@ pub struct InternedType {
     value: usize,
 }
 
+#[derive(Debug)]
 pub struct TypeInterner {
     map: HashMap<Type, InternedType>,
     buff: Vec<Type>,

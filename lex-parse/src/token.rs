@@ -84,6 +84,9 @@ pub enum TokenKind {
     Int,
     Void,
     Char,
+    
+    Struct,
+    Union,
 
     
 

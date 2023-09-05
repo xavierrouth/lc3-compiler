@@ -1,6 +1,6 @@
 use core::fmt;
 
-use lex_parse::{context::{InternedType, InternedString, Context}, ast::ASTNodeHandle, error::AnalysisError};
+use lex_parse::{context::{InternedType, InternedString, Context}, ast::ASTNodeHandle, error::AnalysisError, types::TypePrintable};
 use slotmap::SparseSecondaryMap;
 
 
@@ -27,22 +27,28 @@ impl STScope {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DeclarationType {
-    Var, // These are the same for scoping reasons?
+    Var, 
     Param,
     Function,
     Tag,
     Label,
+    Field,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
-    pub identifier: InternedString, // TODO Make this a string
+    pub identifier: InternedString, 
     pub size: usize,
     pub offset: i32,
     pub type_info: InternedType,
     pub is_global: bool,
     pub kind: DeclarationType
 } 
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Record {
+    pub fields: Vec<Declaration>,
+}
 
 pub(crate) struct DeclarationPrintable<'a> {
     pub(crate) declaration: Declaration,
@@ -53,7 +59,8 @@ impl fmt::Display for DeclarationPrintable<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let decl = &self.declaration;
         let type_info = self.context.resolve_type(decl.type_info);
-        write!(f, "size: {}, offset: {}, type_info: {}, kind: {:?}, global: {}", decl.size, decl.offset, type_info, decl.kind, decl.is_global) //self.type_info, self.kind)
+        write!(f, "size: {}, offset: {}, type_info: {}, kind: {:?}, global: {}", decl.size, decl.offset, 
+        TypePrintable{data: type_info, context: self.context}, decl.kind, decl.is_global) //self.type_info, self.kind)
     }
 }
 

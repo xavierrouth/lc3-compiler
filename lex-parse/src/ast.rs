@@ -5,7 +5,7 @@ use std::mem::Discriminant;
 use std::ops::Deref;
 
 use crate::context::{InternedString, Context, InternedType};
-use crate::types::{Type};
+use crate::types::{Type, TypePrintable};
 use crate::token::{Token};
 
 // Need to maintain some maps, first is debug info, which maps ASTNodes to tokens.
@@ -46,6 +46,21 @@ pub enum UnaryOpType {
     BinNot,
 }
 
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecordType {
+    Union,
+    Struct,
+}
+
+impl Display for RecordType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RecordType::Union => write!(f, "union"),
+            RecordType::Struct => write!(f, "struct"),
+        }
+    }
+}
 
 slotmap::new_key_type! { pub struct ASTNodeHandle; }
 
@@ -94,6 +109,15 @@ pub enum ASTNode {
         identifier: InternedString,
         initializer: Option<ASTNodeHandle>,
         type_info: InternedType
+    },
+    RecordDecl {
+        identifier: InternedString,
+        record_type: RecordType,
+        fields: Vec<ASTNodeHandle>,
+    },
+    FieldDecl {
+        identifier: InternedString,
+        type_info: InternedType,
     },
     // ==== Expressions: ====
     IntLiteral {
@@ -182,7 +206,8 @@ impl Display for ASTNodePrintable<'_> {
                 write!(f, "<ParameterDecl, {}>", self.context.resolve_string(*identifier))
             }
             ASTNode::VariableDecl { identifier, initializer: _, type_info: type_info } => {
-                write!(f, "<VariableDecl, {}, {}>", self.context.resolve_string(*identifier), self.context.resolve_type(*type_info))
+                write!(f, "<VariableDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(*type_info), context: self.context}
+                )
             },
             ASTNode::IntLiteral { value } => {
                 write!(f, "<IntLiteral, {}>", value)
@@ -218,6 +243,12 @@ impl Display for ASTNodePrintable<'_> {
                 write!(f, "<DeclStmt>")
             },
             ASTNode::InlineAsm { assembly: _ } => todo!(),
+            ASTNode::RecordDecl { identifier, record_type, fields } => {
+                write!(f, "<RecordDecl, {record_type}, {}>", self.context.resolve_string(*identifier))
+            }
+            ASTNode::FieldDecl { identifier, type_info } => {
+                write!(f, "<FieldDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(*type_info), context: self.context})
+            }
             /*
             ASTNode::ImplicitCast { child, cast } => {
                 match cast {
@@ -297,6 +328,7 @@ pub trait Vistior<'a> {
             ASTNode::ParameterDecl { identifier: _, type_info: _ } => {}
             ASTNode::IntLiteral { value: _  } => {}
             ASTNode::SymbolRef { identifier: _} => {}
+            ASTNode::FieldDecl { identifier: _, type_info: _ } => {}
 
             ASTNode::Program { declarations } => {
                 for decl in declarations.iter() {
@@ -316,6 +348,12 @@ pub trait Vistior<'a> {
                     self.traverse(decl);
                 }
             },
+            ASTNode::RecordDecl { identifier, record_type, fields } => {
+                for field in fields.iter() {
+                    self.traverse(field);
+                }
+            }
+            
         }
 
         self.postorder(node_h);

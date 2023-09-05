@@ -1,8 +1,14 @@
+struct node {
+    int a;
+    int* next;
+};
+
+
 int main() {
-    int a = 15;
-    int* b = &a;
-    int* c = b;
-    *b = 10;
-    *c = 3;
-    return a;
+    
+    struct node a;
+    a->next;
+    
+    a[10] = 5;
+    return a[10];
 }

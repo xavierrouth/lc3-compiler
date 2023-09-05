@@ -1,7 +1,7 @@
 #![deny(rust_2018_idioms)]
-use std::{path::PathBuf, fs::File, io::Read, cell::RefCell, rc::Rc};
+use std::{path::PathBuf, fs::File, io::Read};
 use analysis::{analysis::Analyzer, typecheck::{Typecheck, TypedASTPrint}};
-use clap::{Parser, error};
+use clap::{Parser};
 //use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
 
@@ -66,11 +66,14 @@ fn main() {
         printer.traverse(root);
     }
 
-    
     let mut analyzer: Analyzer<'_> = Analyzer::new(&ast, &context, &error_handler);
     
     // Check for analysis errors
     analyzer.traverse(root);
+
+    if *error_handler.fatal.borrow() {
+        return;
+    }
 
     if cli.verbose {
         analyzer.print_symbol_table();

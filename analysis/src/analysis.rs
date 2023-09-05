@@ -61,6 +61,7 @@ impl <'a> Analyzer<'a> {
 }
 
 impl <'a> Vistior<'a> for Analyzer<'a> {
+    // TODO: Should this really be in preorder??
     fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
         let node = self.get_node(node_h).clone();
         match node {
@@ -73,21 +74,30 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     self.enter_scope(next_param_slot, next_variable_slot);
                 }
             },
+            ASTNode::RecordDecl { identifier, record_type, fields } => {
+                self.enter_scope(0, 0); // 'use variable slot as places for struct members'
+                // Start generating a record Decl.
+            },
+            ASTNode::FieldDecl { identifier, type_info } => {
+
+            },
             ASTNode::VariableDecl { identifier, initializer: _, type_info } => {
                 // Make a new entry
                 let size = self.context.resolve_type(type_info).calculate_size();
                 // Derive size from TypeInfo
                 let scope = self.curr_scope();
 
+                scope.next_variable_slot += size as i32;
+
                 let entry = Declaration {
                     identifier,
                     size,
-                    offset: scope.next_variable_slot * -1,
+                    offset: (scope.next_variable_slot - 1) * -1,
                     kind: DeclarationType::Var,
                     type_info,
                     is_global: scope.is_global,
                 };
-                scope.next_variable_slot += size as i32;
+                
 
                 // Need some way to error out here:
                 // How am i supposed to extract error from eresuklt?

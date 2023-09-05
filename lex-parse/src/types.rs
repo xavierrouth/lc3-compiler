@@ -1,5 +1,7 @@
 use core::fmt;
-use std::{hash::Hash, default};
+use std::{hash::Hash, default, fmt::write};
+
+use crate::{ast::RecordType, context::{InternedString, Context}};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Qualifiers {
@@ -25,7 +27,9 @@ pub enum CType {
     #[default]
     Int,
     Char,
-    Void
+    Void,
+    Struct(InternedString),
+    Enum(InternedString),
 }
 
 impl Default for Qualifiers {
@@ -53,22 +57,21 @@ impl fmt::Display for Qualifiers {
     }
 }
 
-impl fmt::Display for CType {
+impl fmt::Display for TypeSpecifierPrintable<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CType::Int => write!(f, "int"),
-            CType::Char => write!(f, "char"),
-            CType::Void => write!(f, "void"),
-        }
-    }
-}
-
-
-impl fmt::Display for TypeSpecifier {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.ctype {
-            Some(ctype) =>  write!(f, "{}{}", self.qualifiers, ctype),
-            None => write!(f, "{}", self.qualifiers),
+        match &self.specifier.ctype {
+            Some(ctype) => {
+                let ctype = match ctype {
+                    CType::Int => format!("int"),
+                    CType::Char => format!("char"),
+                    CType::Void => format!("void"),
+                    CType::Struct(tag) => format!("struct {}", self.context.resolve_string(*tag)),
+                    _ => format!("type unprintable"),
+                };
+                write!(f, "{}{}", self.specifier.qualifiers, ctype)
+            }
+            
+            None => write!(f, "{}", self.specifier.qualifiers),
         }
        
     }
@@ -78,6 +81,11 @@ impl fmt::Display for TypeSpecifier {
 pub struct TypeSpecifier {
     pub qualifiers: Qualifiers,
     pub ctype: Option<CType>,
+}
+
+pub struct TypeSpecifierPrintable<'a> {
+    pub specifier: &'a TypeSpecifier,
+    pub context: &'a Context<'a>,
 }
 
 impl Hash for TypeSpecifier {
@@ -117,14 +125,12 @@ impl DeclaratorPart {
 pub struct Type {
     pub declarator: Vec<DeclaratorPart>,
     pub specifier: TypeSpecifier,
-    
 }
 
-pub struct TypeWithQuals {
-    pub qualifiers: Qualifiers,
-    
+pub struct TypePrintable<'a> {
+    pub data: Type,
+    pub context: &'a Context<'a>,
 }
-
 
 impl Type {
     pub fn new() -> Type {
@@ -151,7 +157,7 @@ impl Type {
 }
 
 
-impl fmt::Display for Type {
+impl <'a> fmt::Display for TypePrintable<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         
         fn print_declarator(declarator: &mut Vec<DeclaratorPart>, prev_fnc_or_array: bool) -> String {
@@ -183,9 +189,9 @@ impl fmt::Display for Type {
                 }
             }
         }
-        let string = print_declarator(& mut self.declarator.clone(), false);
+        let string = print_declarator(& mut self.data.declarator.clone(), false);
 
-        write!(f, "{:}{string}", self.specifier)
+        write!(f, "{:}{string}", TypeSpecifierPrintable{specifier: &self.data.specifier, context: self.context})
     }
     
 }
