@@ -25,7 +25,7 @@ maxArray
 ; for loop initialization
     AND R0, R0, #0
     STR R0, R5, #0                      ; assign to variable i
-maxArray.for.0 ;                                                 test condition
+maxArray.for.0                          ; test condition
     AND R0, R0, #0
     ADD R0, R0, #3
     LDR R1, R5, #0                      ; load local variable 'i'

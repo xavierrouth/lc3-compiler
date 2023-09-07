@@ -1,7 +1,7 @@
 void maxArray(int* x, int* y) {
     int i;
 
-    for (i = 0; i < 3; i = i + 1) {
+    for (i = 4; i > 0; i = i - 1) {
         if (y[i] > x[i]) {
             x[i] = y[i];
         }
