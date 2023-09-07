@@ -105,7 +105,7 @@ impl<'a> Codegen<'a> {
                 for decl in declarations {
                     self.emit_ast_node(decl);
                 }
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::Halt, None));
+                //self.printer.inst(LC3Bundle::Instruction(LC3Inst::Halt, None));
                 //self.printer.data(LC3Bundle::Directive(Some(Label::Label("USER_STACK".to_string)), .LC3Directive::Fill(()), ()))
             }
             // Decls:
