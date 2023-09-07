@@ -578,7 +578,10 @@ impl<'a> Codegen<'a> {
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(1)), None));
 
                 let num_args: i32 = arguments.len().try_into().unwrap();
-                self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(num_args)), Some("pop arguments".to_string())));
+                if num_args != 0 {
+                    self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(num_args)), Some("pop arguments".to_string())));
+                }
+                
 
                 // Restore regs
 

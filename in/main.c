@@ -1,13 +1,15 @@
-//struct node {
- //   int a;
-  //  int* next;
-//};
+int* printx(){
+	static int x = 0;
+	x = x + 1;
+	//printf("value of x is %d \n",x);
+	return (&x);
+}
 
-
-int main() {
-    //struct node a;
-    int* a;
-    //int a[120];
-    a[10] = 5;
-    return a[10];
+int main(){
+	int *x_ptr;
+	x_ptr = printx();
+	x_ptr = printx();
+	*x_ptr = (*x_ptr) + 1;
+	printx();
+	return *x_ptr;
 }
