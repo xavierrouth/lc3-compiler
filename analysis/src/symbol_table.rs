@@ -15,10 +15,10 @@ pub struct STScope {
 
 
 impl STScope {
-    pub fn new() -> STScope {
+    pub fn new(next_param_slot: i32, next_variable_slot: i32) -> STScope {
         STScope {
-            next_param_slot: 0,
-            next_variable_slot: 0,
+            next_param_slot,
+            next_variable_slot,
             var_entries: Vec::new(),
             is_global: false,
         }
@@ -73,7 +73,7 @@ pub struct SymbolTable {
 impl SymbolTable {
     pub fn new() -> SymbolTable {
         let mut st = SymbolTable { entries: SparseSecondaryMap::new(), stack: Vec::new()};
-        let mut global_scope = STScope::new();
+        let mut global_scope = STScope::new(0, 0);
         global_scope.is_global = true;
         st.stack.push(global_scope);
         st
@@ -107,7 +107,6 @@ impl SymbolTable {
         }
         entry
     }
-
 
     pub fn add(&mut self, node: ASTNodeHandle, entry: Declaration) -> Result<(), AnalysisError> {
         if self.search_scope(&entry.identifier, &entry.kind).is_some() {

@@ -164,7 +164,7 @@ impl fmt::Display for LC3Bundle {
         match self {
             LC3Bundle::HeaderLabel(label, comment) => {
                 match comment {
-                    Some(comment) => write!(f, "{label}, ; {comment}"),
+                    Some(comment) => write!(f, "{label} {:<50}{comment}", ";"),
                     None => write!(f, "{label}"),
                 }
             }

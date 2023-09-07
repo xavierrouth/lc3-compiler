@@ -36,8 +36,8 @@ impl <'a> Analyzer<'a> {
         }
     }
 
-    fn enter_scope(&mut self, _next_param_slot: i32, _next_variable_slot: i32) -> () {
-        self.symbol_table.stack.push(STScope::new());
+    fn enter_scope(&mut self, next_param_slot: i32, next_variable_slot: i32) -> () {
+        self.symbol_table.stack.push(STScope::new(next_param_slot, next_variable_slot));
     }
 
     fn curr_scope(&mut self) -> &mut STScope {

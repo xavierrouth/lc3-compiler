@@ -266,7 +266,7 @@ impl<'a> Codegen<'a> {
 
                 let func_name = self.context.resolve_string(self.scope);
 
-                let name = format!("{func_name}.for.{}", self.if_counter);
+                let name = format!("{func_name}.for.{}", self.for_counter);
                 let label_header = Label::Label(format!("{name}"));
                 let label_end = Label::Label(format!("{name}.end"));
 
@@ -279,7 +279,7 @@ impl<'a> Codegen<'a> {
                 self.reset_regfile();
                 emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
 
-                emit!(self, Instruction(LC3Inst::Br(true, true, false, label_end), Some("if false, skip over loop body".to_string())));
+                emit!(self, Instruction(LC3Inst::Br(true, true, false, label_end.clone()), Some("if false, skip over loop body".to_string())));
 
                 self.emit_ast_node(body);
                 
@@ -289,6 +289,7 @@ impl<'a> Codegen<'a> {
 
                 emit!(self, Instruction(LC3Inst::Br(true, true, true, label_header), Some("loop".to_string())));
 
+                emit!(self, HeaderLabel(label_end, None));
                 self.for_counter += 1;
 
             }
