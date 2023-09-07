@@ -35,8 +35,19 @@ impl AsmPrinter {
         writeln!(file, "; ---------------------------------------------------------------------------")?;
 
         writeln!(file, ".ORIG x3000")?;
-
+        let mut prev_newline = false;
         for inst in &self.instructions {
+            match inst {
+                LC3Bundle::Newline => {
+                    if prev_newline == true {
+                        continue;
+                    }
+                    prev_newline = true;
+                }
+                _ => {
+                    prev_newline = false;
+                }
+            };
             writeln!(file, "{inst}")?;
         }
 

@@ -45,16 +45,18 @@ impl<'a> Codegen<'a> {
     }
 
     fn get_empty_reg(&self) -> Register {
-        for n in 0..7 {
+        // TODO: Flag  
+        for n in 0..4 {
             if self.regfile[n] == false {
                 return Register {value: n}; 
             }
         }
-        Register { value: 10 } // TODO: error out here
+        println!("error: cannot allocate registers effectively, please move complex expressions to separate statements.");
+        panic!(); // TODO: Surpress panic.
     }
 
     fn reset_regfile(&mut self) -> () {
-        for n in 0..7 {
+        for n in 0..4 {
             self.regfile[n] = false;
         }
     }
@@ -110,6 +112,7 @@ impl<'a> Codegen<'a> {
             }
             // Decls:
             ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
+                self.printer.inst(Newline);
                 self.scope = *identifier;
 
                 let function = self.context.resolve_string(self.scope);
@@ -152,6 +155,7 @@ impl<'a> Codegen<'a> {
 
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ret, None));
                 self.printer.inst(LC3Bundle::SectionComment("end function.".to_string()));
+                self.printer.inst(Newline);
             },
             ASTNode::ParameterDecl { identifier, type_info } => {},
             ASTNode::VariableDecl { identifier, initializer, type_info } => {
@@ -487,7 +491,6 @@ impl<'a> Codegen<'a> {
                             self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some("load element from array".to_string())));
                         }
 
-
                         self.regfile[base.value] = Self::UNUSED;
                         self.regfile[offset.value] = Self::UNUSED;
                         self.regfile[reg.value] = Self::USED;
@@ -555,12 +558,25 @@ impl<'a> Codegen<'a> {
                 // TODO:
                 // Push in-use regs
 
+                let mut caller_saved: Vec<Register> = Vec::new();
+
+                for n in 0..7 {
+                    if self.regfile[n] == true {
+                        let reg = Register {value: n};
+                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), None));
+                        self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(reg, Self::R6, Imm::Int(0)), Some(format!("caller save {reg}"))));
+                        caller_saved.push(reg);
+                        self.printer.inst(Newline);
+                    }
+                }
+
 
                 // Push arguments right to left.
                 for arg in arguments.into_iter().rev() {
                     let arg_reg = self.emit_expression_node(arg);
                     self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), None));
                     self.printer.inst(LC3Bundle::Instruction(LC3Inst::Str(arg_reg, Self::R6, Imm::Int(0)), Some("push argument to stack.".to_string())));
+                    self.printer.inst(Newline);
                     self.regfile[arg_reg.value] = Self::UNUSED;
                     // Emit newline
                 }
@@ -569,9 +585,10 @@ impl<'a> Codegen<'a> {
                 let entry = self.symbol_table.entries.get(*symbol_ref).unwrap();
 
                 let identifier = self.context.resolve_string(entry.identifier);
-
+                self.printer.inst(Newline);
                 // Emit jump:
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::Jsr(Label::Label(identifier.to_string())), Some("call function.".to_string())));
+                self.printer.inst(Newline);
                 // Handle return value.
                 let ret = self.get_empty_reg();
                 self.printer.inst(LC3Bundle::Instruction(LC3Inst::Ldr(ret, Self::R6, Imm::Int(0)), Some("load return value.".to_string()))); 
@@ -582,9 +599,14 @@ impl<'a> Codegen<'a> {
                     self.printer.inst(LC3Bundle::Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(num_args)), Some("pop arguments".to_string())));
                 }
                 
-
                 // Restore regs
-
+                for reg in caller_saved {
+                    self.printer.inst(Newline);
+                    self.printer.inst(Instruction(LC3Inst::Ldr(reg, Self::R6, Imm::Int(0)), Some(format!("caller restore {reg}")))); 
+                    self.printer.inst(Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(1)), None));
+                    self.printer.inst(Newline);
+                }
+                self.printer.inst(Newline);
                 return ret;
             },
             ASTNode::IntLiteral { value } => {

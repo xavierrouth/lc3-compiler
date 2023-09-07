@@ -79,7 +79,7 @@ impl <'ctx> ErrorHandler<'ctx> {
 
                 println!("{} redeclaration of '{}'", "error:".red(), identifier);
                 println!("line {} | {} ", token.row + 1, line);
-                
+                // Account for line number:
                 let mut length: usize = "line  | ".len();
                 let n = token.row + 1;
                 length += successors(Some(n), |&n| (n >= 10).then(|| n / 10)).count(); // Number of spaces this int takes up.
@@ -97,6 +97,7 @@ impl <'ctx> ErrorHandler<'ctx> {
                 println!("line {} | {} ", token.row + 1, line);
                 
                 let mut length: usize = "line  | ".len();
+                // Account for line number:
                 let n = token.row + 1;
                 length += successors(Some(n), |&n| (n >= 10).then(|| n / 10)).count(); // Number of spaces this int takes up.
 
@@ -118,7 +119,6 @@ impl <'ctx> ErrorHandler<'ctx> {
     }
 
     fn print_line(& self, line_num: usize) -> () {
-
         let line = self.context.get_line(line_num);
         println!("line {} | {} ", line_num + 1, line);
     }
