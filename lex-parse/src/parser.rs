@@ -127,7 +127,7 @@ impl<'a> Parser<'a> {
         self.eat_token(TokenKind::OpenBrace)?;
         let mut fields: Vec<ASTNodeHandle> = Vec::new();
 
-        while (true) {
+        loop {
             if self.expect_token(TokenKind::CloseBrace) {
                 break;
             }

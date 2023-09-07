@@ -2,9 +2,7 @@ int fib(int n) {
     if (2 > n) {
         return n;
     }
-    int a = fib(n-1);
-    int b = fib(n-2);
-    return a + b;
+    return fib(n-1) + fib(n-2);
 }
 
 int main() {

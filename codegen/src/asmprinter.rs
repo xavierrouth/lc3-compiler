@@ -35,8 +35,19 @@ impl AsmPrinter {
         writeln!(file, "; ---------------------------------------------------------------------------")?;
 
         writeln!(file, ".ORIG x3000")?;
-
+        let mut prev_newline = false;
         for inst in &self.instructions {
+            match inst {
+                LC3Bundle::Newline => {
+                    if prev_newline == true {
+                        continue;
+                    }
+                    prev_newline = true;
+                }
+                _ => {
+                    prev_newline = false;
+                }
+            };
             writeln!(file, "{inst}")?;
         }
 
@@ -102,7 +113,7 @@ pub enum LC3Inst {
     AndReg(Register, Register, Register),
     AndImm(Register, Register, Immediate),
     Br(bool, bool, bool, Label),
-    Jmp(Label),
+    Jmp(Register),
     Jsr(Label),
     Jsrr(Register),
     Ld(Register, Label), // Should be Label or immediate, but almost always Label
@@ -203,15 +214,15 @@ impl fmt::Display for LC3Inst {
                     (false, false, false) => write!(f, "; bad BR opcode"),
                 }
             }
-            LC3Inst::Jmp(_) => todo!(), // This is same as ret actually
+            LC3Inst::Jmp(reg) => write!(f, "JMP {reg}"), // This is same as ret actually
             LC3Inst::Jsr(label) => write!(f, "JSR {label}"),
             LC3Inst::Jsrr(_) => todo!(),
             LC3Inst::Ld(reg, label) => write!(f, "LD  {reg}, {label}"),
             LC3Inst::Ldi(reg, label) => write!(f, "LDI {reg}, {label}"),
             LC3Inst::Ldr(arg1, arg2, arg3) => write!(f, "LDR {arg1}, {arg2}, {arg3}"),
-            LC3Inst::Lea(_, _) => todo!(),
+            LC3Inst::Lea(reg, label) => write!(f, "LEA {reg}, {label}"),
             LC3Inst::Not(dst, src) => write!(f, "NOT {dst}, {src}"),
-            LC3Inst::Ret => write!(f, "RET"),
+            LC3Inst::Ret => write!(f, "RET"), // This is a special case of jump
             LC3Inst::Rti => todo!(),
             LC3Inst::St(reg, label) => write!(f, "ST  {reg}, {label}"),
             LC3Inst::Sti(reg, label) => write!(f, "STI {reg}, {label}"),

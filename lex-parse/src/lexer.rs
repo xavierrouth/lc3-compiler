@@ -37,7 +37,7 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
        
         self.skip_until();
         
-        let start_index = self.index;
+        let start_col = self.col;
 
         let row = self.row;
         let col = self.col;
@@ -173,8 +173,7 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
 
         };
 
-
-        let length: usize = self.index - start_index;
+        let length: usize = self.col - start_col;
 
         let token: Token = Token {kind: kind.unwrap_or(TokenKind::EOF), row, col, length, };
 
@@ -252,12 +251,11 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
                 Some(ch) => ch,
                 None => return EOF_CHAR // This is EOF 
             };
-            self.col += 1;
 
+            self.col += 1;
             self.index += ch.len_utf8();
 
             if ch == '\n' {
-                self.advance();
                 self.col = 0;
                 self.row += 1;
             }
