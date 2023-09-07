@@ -11,22 +11,36 @@
     JSR main
 
 main
-    ADD R6, R6, #-15                    ; allocate space for 'a'
-
+    ADD R6, R6, #-1                     ; allocate space for 'a'
     AND R0, R0, #0
-    ADD R0, R0, #5
-    ADD R1, R5, #-14                    ; load base of array access for 'a'
-    AND R2, R2, #0
-    ADD R2, R2, #10
-    ADD R3, R1, R2                      ; calculate index into array
-    STR R0, R3, #0
+    STR R0, R5, #0                      ; initialize 'a'
 
-    ADD R0, R5, #-14                    ; load base of array access for 'a'
-    AND R1, R1, #0
-    ADD R1, R1, #10
-    ADD R2, R0, R1                      ; calculate index into array
-    LDR R2, R2, #0                      ; load element from array
-    STI R2, RETURN_SLOT                 ; write return value from main
+; for loop initialization
+    ADD R6, R6, #-1                     ; allocate space for 'i'
+    AND R0, R0, #0
+    STR R0, R5, #0                      ; initialize 'i'
+main.for.0, ; test condition
+    AND R0, R0, #0
+    ADD R0, R0, #10
+    LDR R1, R5, #0                      ; load local variable 'i'
+    NOT R1, R1                          ; evaluate '<'
+    ADD R1, R1, #1
+    ADD R1, R1, R0
+    AND R1, R1, R1                      ; load condition into NZP
+    BRnz main.for.0.end                 ; if false, skip over loop body
+    LDR R0, R5, #0                      ; load local variable 'a'
+    LDR R1, R5, #0                      ; load local variable 'i'
+    ADD R0, R0, R1
+    STR R0, R5, #0                      ; assign to variable a
+
+; update expression
+    LDR R0, R5, #0                      ; load local variable 'i'
+    ADD R0, R0, #1
+    STR R0, R5, #0                      ; assign to variable i
+    BR   main.for.0                     ; loop
+
+    LDR R0, R5, #0                      ; load local variable 'a'
+    STI R0, RETURN_SLOT                 ; write return value from main
     HALT
 
 
