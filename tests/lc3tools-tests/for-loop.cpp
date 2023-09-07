@@ -22,7 +22,7 @@ void testBringup(lc3::sim & sim) { }
 void testTeardown(lc3::sim & sim) { }
 
 void setup(Tester & tester) { 
-    tester.registerTest("array-access", Test, 1, false);
+    tester.registerTest("for-loop", Test, 1, false);
 }
 
 void shutdown(void) { }

@@ -128,6 +128,10 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                     },
                     BinaryOpType::ArrayAccess => {
                         // Unsure if this needs casting
+                        match self.lr.get(right).unwrap() {
+                            LR::LValue => {self.casts.insert(right, TypeCast::LvalueToRvalue);},
+                            LR::RValue => ()
+                        }
                         match self.lr.get(left).unwrap() {
                             LR::LValue => {self.casts.insert(left, TypeCast::LvalueToRvalue);},
                             LR::RValue => ()
