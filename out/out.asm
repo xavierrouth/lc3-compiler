@@ -19,34 +19,34 @@ main
 
     AND R0, R0, #0
     ADD R0, R0, #10
-    ADD R1, R5, #-1
+    ADD R1, R5, #-1                     ; calculate address of 'node1'
     ADD R2, R1, #0                      ; calculate index into struct
     STR R0, R2, #0
 
     AND R0, R0, #0
     ADD R0, R0, #20
-    ADD R1, R5, #-3
+    ADD R1, R5, #-3                     ; calculate address of 'node2'
     ADD R2, R1, #0                      ; calculate index into struct
     STR R0, R2, #0
 
     AND R0, R0, #0
     ADD R0, R0, #30
-    ADD R1, R5, #-5
+    ADD R1, R5, #-5                     ; calculate address of 'node3'
     ADD R2, R1, #0                      ; calculate index into struct
     STR R0, R2, #0
 
     ADD R0, R5, #-3                     ; take address of 'node2'
-    ADD R1, R5, #-1
+    ADD R1, R5, #-1                     ; calculate address of 'node1'
     ADD R2, R1, #1                      ; calculate index into struct
     STR R0, R2, #0
 
     ADD R0, R5, #-5                     ; take address of 'node3'
-    ADD R1, R5, #-3
+    ADD R1, R5, #-3                     ; calculate address of 'node2'
     ADD R2, R1, #1                      ; calculate index into struct
     STR R0, R2, #0
 
     AND R0, R0, #0
-    ADD R1, R5, #-5
+    ADD R1, R5, #-5                     ; calculate address of 'node3'
     ADD R2, R1, #1                      ; calculate index into struct
     STR R0, R2, #0
 
@@ -59,38 +59,38 @@ main
     STR R0, R5, #-8                     ; initialize 'sum'
 
     LDR R0, R5, #-8                     ; load local variable 'sum'
-    ADD R1, R5, #-7
+    ADD R1, R5, #-7                     ; calculate address of 'current'
     LDR R1, R1, #0                      ; dereference struct pointer
     ADD R2, R1, #0                      ; calculate index into struct
-    LDR R2, R2, #0                      ; load element from struct
+    LDR R2, R2, #0                      ; load element data from struct
     ADD R0, R0, R2
     STR R0, R5, #-8                     ; assign to variable sum
 
-    ADD R0, R5, #-7
+    ADD R0, R5, #-7                     ; calculate address of 'current'
     LDR R0, R0, #0                      ; dereference struct pointer
     ADD R1, R0, #1                      ; calculate index into struct
-    LDR R1, R1, #0                      ; load element from struct
+    LDR R1, R1, #0                      ; load element next from struct
     STR R1, R5, #-7                     ; assign to variable current
 
     LDR R0, R5, #-8                     ; load local variable 'sum'
-    ADD R1, R5, #-7
+    ADD R1, R5, #-7                     ; calculate address of 'current'
     LDR R1, R1, #0                      ; dereference struct pointer
     ADD R2, R1, #0                      ; calculate index into struct
-    LDR R2, R2, #0                      ; load element from struct
+    LDR R2, R2, #0                      ; load element data from struct
     ADD R0, R0, R2
     STR R0, R5, #-8                     ; assign to variable sum
 
-    ADD R0, R5, #-7
+    ADD R0, R5, #-7                     ; calculate address of 'current'
     LDR R0, R0, #0                      ; dereference struct pointer
     ADD R1, R0, #1                      ; calculate index into struct
-    LDR R1, R1, #0                      ; load element from struct
+    LDR R1, R1, #0                      ; load element next from struct
     STR R1, R5, #-7                     ; assign to variable current
 
     LDR R0, R5, #-8                     ; load local variable 'sum'
-    ADD R1, R5, #-7
+    ADD R1, R5, #-7                     ; calculate address of 'current'
     LDR R1, R1, #0                      ; dereference struct pointer
     ADD R2, R1, #0                      ; calculate index into struct
-    LDR R2, R2, #0                      ; load element from struct
+    LDR R2, R2, #0                      ; load element data from struct
     ADD R0, R0, R2
     STR R0, R5, #-8                     ; assign to variable sum
 
