@@ -4,19 +4,22 @@ use std::rc::Rc;
 
 use slotmap::{SparseSecondaryMap, SecondaryMap};
 
-use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, ASTNodePrintable};
+use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, ASTNodePrintable, BinaryOpType};
 use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{InternedString, InternedType, Context, self};
-use lex_parse::types::{Type, DeclaratorPart};
+use lex_parse::types::{Type, DeclaratorPart, CType};
 
-use crate::symbol_table::{self, SymbolTable, STScope, Declaration, DeclarationType, DeclarationPrintable};
+use crate::symbol_table::{self, SymbolTable, Scope, Declaration, DeclarationType, DeclarationPrintable, Record};
 
-/** Analysis pass on AST, borrows AST while it is alive. */
+/** Analysis pass on AST, borrows AST while it is alive. 
+ *  Populates a symbol table, and maps symbol references to the corresponding declarations in the symbol table.
+ *  
+*/
 pub struct Analyzer<'a> {
     pub symbol_table: SymbolTable, // 
-    ast: &'a AST,
     halt: bool,
 
+    ast: &'a AST,
     error_handler: &'a ErrorHandler<'a>,
     context: &'a Context<'a>, //TODO: Merge error handler and context.
 }
@@ -30,17 +33,26 @@ impl <'a> Analyzer<'a> {
         for (handle, declaration) in &self.symbol_table.entries {
             let node = self.get_node(&handle);
             match node {
-                ASTNode::SymbolRef{.. } => (),
+                ASTNode::SymbolRef{.. } => (),    
                 _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, DeclarationPrintable{declaration: declaration.clone(), context: self.context})}
+            }
+        }
+        println!("Records:");
+        for record in &self.symbol_table.records {
+            let Record { identifier, size, fields } = record;
+            let identifier = self.context.resolve_string(*identifier);
+            println!("<struct {identifier}, size: {size}>");
+            for field in fields {
+                println!("{}", DeclarationPrintable{declaration: field.clone(), context: self.context});
             }
         }
     }
 
     fn enter_scope(&mut self, next_param_slot: i32, next_variable_slot: i32) -> () {
-        self.symbol_table.stack.push(STScope::new(next_param_slot, next_variable_slot));
+        self.symbol_table.stack.push(Scope::new(next_param_slot, next_variable_slot));
     }
 
-    fn curr_scope(&mut self) -> &mut STScope {
+    fn curr_scope(&mut self) -> &mut Scope {
         self.symbol_table.stack.last_mut().unwrap()
     }
 
@@ -75,15 +87,56 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                 }
             },
             ASTNode::RecordDecl { identifier, record_type, fields } => {
-                self.enter_scope(0, 0); // 'use variable slot as places for struct members'
-                // Start generating a record Decl.
-            },
-            ASTNode::FieldDecl { identifier, type_info } => {
+                let mut record_fields = Vec::new();
+                let mut offset: usize = 0;
 
+                for field in fields {
+                    let ASTNode::FieldDecl{identifier, type_info} = self.get_node(&field) else {
+                        return;
+                    };
+                    let size = self.context.resolve_type(*type_info).calculate_size(); 
+                    let decl = Declaration {
+                        identifier: *identifier,
+                        size: size,
+                        offset: offset.try_into().unwrap(),
+                        type_info: *type_info,
+                        is_global: false,
+                        kind: DeclarationType::Field,
+                    };
+                    offset += size;
+                    record_fields.push(decl);
+                }
+                
+                self.symbol_table.records.push(
+                Record {
+                    identifier,
+                    size: offset,
+                    fields: record_fields,
+                });
+
+                // Start generating a record Decl.
             },
             ASTNode::VariableDecl { identifier, initializer: _, type_info } => {
                 // Make a new entry
-                let size = self.context.resolve_type(type_info).calculate_size();
+                // We should really store both Records and Types in the type contaxt.
+                let size = {
+                    let type_info = self.context.resolve_type(type_info);
+                    if type_info.is_record() {
+                        let Some(CType::Struct(type_name)) = type_info.specifier.ctype else {
+                            self.report_error(AnalysisError::General(*node_h));
+                            return;
+                        };
+                        let Some(record) = self.symbol_table.search_record(&type_name) else {
+                            self.report_error(AnalysisError::General(*node_h));
+                            return;
+                        };
+                        record.size
+
+                    }
+                    else {
+                        type_info.calculate_size()
+                    }
+                };
                 // Derive size from TypeInfo
                 let scope = self.curr_scope();
 
@@ -110,6 +163,24 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
             },
             ASTNode::ParameterDecl { identifier, type_info } => {
                 // Make a new entry
+                let size = {
+                    let type_info = self.context.resolve_type(type_info);
+                    if type_info.is_record() {
+                        let Some(CType::Struct(type_name)) = type_info.specifier.ctype else {
+                            self.report_error(AnalysisError::General(*node_h));
+                            return;
+                        };
+                        let Some(record) = self.symbol_table.search_record(&type_name) else {
+                            self.report_error(AnalysisError::General(*node_h));
+                            return;
+                        };
+                        record.size
+
+                    }
+                    else {
+                        type_info.calculate_size()
+                    }
+                };
                 
                 let scope = self.curr_scope();
 
@@ -129,7 +200,7 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     Err(error) => {self.report_error(error)}
                     Ok(()) => ()
                 }
-            }
+            },
             ASTNode::FunctionDecl { body: _, parameters: _, identifier, return_type } => {
                 let entry = Declaration {
                     identifier: identifier,
@@ -158,7 +229,7 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
             // Not a delcaration:
             ASTNode::SymbolRef { identifier } => {
                 // If this node already has an entry, than just ignore it:,
-                // This will happen if FunctionCall sets it
+                // This will happen if FunctionCall sets it, or a binop that is a struct access.
                 if self.symbol_table.entries.get(*node_h).is_some() {
                     return;
                 }

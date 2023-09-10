@@ -10,156 +10,92 @@
     ADD R5, R6, #-1
     JSR main
 
-maxArray
-; callee setup:
-    ADD R6, R6, #-1                     ; allocate spot for return value
-    ADD R6, R6, #-1
-    STR R7, R6, #0                      ; push R7 (return address)
-    ADD R6, R6, #-1
-    STR R5, R6, #0                      ; push R5 (caller frame pointer)
-    ADD R5, R6, #-1                     ; set frame pointer
-
-; function body:
-    ADD R6, R6, #-1                     ; allocate space for 'i'
-
-; for loop initialization
-    AND R0, R0, #0
-    STR R0, R5, #0                      ; assign to variable i
-maxArray.for.0                          ; test condition
-    AND R0, R0, #0
-    ADD R0, R0, #3
-    LDR R1, R5, #0                      ; load local variable 'i'
-    NOT R1, R1                          ; evaluate '<'
-    ADD R1, R1, #1
-    ADD R1, R1, R0
-    AND R1, R1, R1                      ; load condition into NZP
-    BRnz maxArray.for.0.end             ; if false, skip over loop body
-    LDR R0, R5, #4                      ; load parameter 'x'
-    LDR R1, R5, #0                      ; load local variable 'i'
-    ADD R2, R0, R1                      ; calculate index into array
-    LDR R2, R2, #0                      ; load element from array
-    LDR R0, R5, #5                      ; load parameter 'y'
-    LDR R1, R5, #0                      ; load local variable 'i'
-    ADD R3, R0, R1                      ; calculate index into array
-    LDR R3, R3, #0                      ; load element from array
-    NOT R2, R2                          ; evaluate '>'
-    ADD R2, R2, #1
-    ADD R3, R3, R2
-
-    AND R3, R3, R3                      ; load condition into NZP
-    BRnz maxArray.if.0.end              ; if false, jump over if statement
-
-    LDR R0, R5, #5                      ; load parameter 'y'
-    LDR R1, R5, #0                      ; load local variable 'i'
-    ADD R2, R0, R1                      ; calculate index into array
-    LDR R2, R2, #0                      ; load element from array
-    LDR R0, R5, #4                      ; load parameter 'x'
-    LDR R1, R5, #0                      ; load local variable 'i'
-    ADD R3, R0, R1                      ; calculate index into array
-    STR R2, R3, #0
-
-maxArray.if.0.end
-
-; update expression
-    LDR R0, R5, #0                      ; load local variable 'i'
-    ADD R0, R0, #1
-    STR R0, R5, #0                      ; assign to variable i
-    BR   maxArray.for.0                 ; loop
-maxArray.for.0.end
-
-    BR   maxArray.teardown
-
-maxArray.teardown
-    ADD R6, R5, #1                      ; pop local variables
-    LDR R5, R6, #0                      ; pop frame pointer
-    ADD R6, R6, #1
-    LDR R7, R6, #0                      ; pop return address
-    ADD R6, R6, #1
-    RET
-; end function.
-
 main
-    ADD R6, R6, #-3                     ; allocate space for 'a'
+    ADD R6, R6, #-2                     ; allocate space for 'node1'
+
+    ADD R6, R6, #-2                     ; allocate space for 'node2'
+
+    ADD R6, R6, #-2                     ; allocate space for 'node3'
 
     AND R0, R0, #0
-    ADD R0, R0, #1
-    ADD R1, R5, #-2                     ; load base of array access for 'a'
-    AND R2, R2, #0
-    ADD R3, R1, R2                      ; calculate index into array
-    STR R0, R3, #0
+    ADD R0, R0, #10
+    ADD R1, R5, #-1
+    ADD R2, R1, #0                      ; calculate index into struct
+    STR R0, R2, #0
 
     AND R0, R0, #0
-    ADD R0, R0, #3
-    ADD R1, R5, #-2                     ; load base of array access for 'a'
-    AND R2, R2, #0
-    ADD R2, R2, #1
-    ADD R3, R1, R2                      ; calculate index into array
-    STR R0, R3, #0
+    ADD R0, R0, #20
+    ADD R1, R5, #-3
+    ADD R2, R1, #0                      ; calculate index into struct
+    STR R0, R2, #0
 
     AND R0, R0, #0
-    ADD R0, R0, #4
-    ADD R1, R5, #-2                     ; load base of array access for 'a'
-    AND R2, R2, #0
-    ADD R2, R2, #2
-    ADD R3, R1, R2                      ; calculate index into array
-    STR R0, R3, #0
+    ADD R0, R0, #30
+    ADD R1, R5, #-5
+    ADD R2, R1, #0                      ; calculate index into struct
+    STR R0, R2, #0
 
-    ADD R6, R6, #-3                     ; allocate space for 'b'
+    ADD R0, R5, #-3                     ; take address of 'node2'
+    ADD R1, R5, #-1
+    ADD R2, R1, #1                      ; calculate index into struct
+    STR R0, R2, #0
 
-    AND R0, R0, #0
-    ADD R0, R0, #3
-    ADD R1, R5, #-5                     ; load base of array access for 'b'
-    AND R2, R2, #0
-    ADD R3, R1, R2                      ; calculate index into array
-    STR R0, R3, #0
-
-    AND R0, R0, #0
-    ADD R0, R0, #1
-    ADD R1, R5, #-5                     ; load base of array access for 'b'
-    AND R2, R2, #0
-    ADD R2, R2, #1
-    ADD R3, R1, R2                      ; calculate index into array
-    STR R0, R3, #0
+    ADD R0, R5, #-5                     ; take address of 'node3'
+    ADD R1, R5, #-3
+    ADD R2, R1, #1                      ; calculate index into struct
+    STR R0, R2, #0
 
     AND R0, R0, #0
-    ADD R0, R0, #1
-    ADD R1, R5, #-5                     ; load base of array access for 'b'
-    AND R2, R2, #0
-    ADD R2, R2, #2
-    ADD R3, R1, R2                      ; calculate index into array
-    STR R0, R3, #0
+    ADD R1, R5, #-5
+    ADD R2, R1, #1                      ; calculate index into struct
+    STR R0, R2, #0
 
-    ADD R0, R5, #-5                     ; load base of array access for 'b'
-    ADD R6, R6, #-1
-    STR R0, R6, #0                      ; push argument to stack.
+    ADD R6, R6, #-2                     ; allocate space for 'current'
+    ADD R0, R5, #-1                     ; take address of 'node1'
+    STR R0, R5, #-7                     ; initialize 'current'
 
-    ADD R0, R5, #-2                     ; load base of array access for 'a'
-    ADD R6, R6, #-1
-    STR R0, R6, #0                      ; push argument to stack.
+    ADD R6, R6, #-1                     ; allocate space for 'sum'
+    AND R0, R0, #0
+    STR R0, R5, #-8                     ; initialize 'sum'
 
-    JSR maxArray                        ; call function.
+    LDR R0, R5, #-8                     ; load local variable 'sum'
+    ADD R1, R5, #-7
+    LDR R1, R1, #0                      ; dereference struct pointer
+    ADD R2, R1, #0                      ; calculate index into struct
+    LDR R2, R2, #0                      ; load element from struct
+    ADD R0, R0, R2
+    STR R0, R5, #-8                     ; assign to variable sum
 
-    LDR R0, R6, #0                      ; load return value.
-    ADD R6, R6, #1
-    ADD R6, R6, #2                      ; pop arguments
+    ADD R0, R5, #-7
+    LDR R0, R0, #0                      ; dereference struct pointer
+    ADD R1, R0, #1                      ; calculate index into struct
+    LDR R1, R1, #0                      ; load element from struct
+    STR R1, R5, #-7                     ; assign to variable current
 
-    ADD R0, R5, #-2                     ; load base of array access for 'a'
-    AND R1, R1, #0
-    ADD R2, R0, R1                      ; calculate index into array
-    LDR R2, R2, #0                      ; load element from array
-    ADD R0, R5, #-2                     ; load base of array access for 'a'
-    AND R1, R1, #0
-    ADD R1, R1, #1
-    ADD R3, R0, R1                      ; calculate index into array
-    LDR R3, R3, #0                      ; load element from array
-    ADD R2, R2, R3
-    ADD R0, R5, #-2                     ; load base of array access for 'a'
-    AND R1, R1, #0
-    ADD R1, R1, #2
-    ADD R3, R0, R1                      ; calculate index into array
-    LDR R3, R3, #0                      ; load element from array
-    ADD R2, R2, R3
-    STI R2, RETURN_SLOT                 ; write return value from main
+    LDR R0, R5, #-8                     ; load local variable 'sum'
+    ADD R1, R5, #-7
+    LDR R1, R1, #0                      ; dereference struct pointer
+    ADD R2, R1, #0                      ; calculate index into struct
+    LDR R2, R2, #0                      ; load element from struct
+    ADD R0, R0, R2
+    STR R0, R5, #-8                     ; assign to variable sum
+
+    ADD R0, R5, #-7
+    LDR R0, R0, #0                      ; dereference struct pointer
+    ADD R1, R0, #1                      ; calculate index into struct
+    LDR R1, R1, #0                      ; load element from struct
+    STR R1, R5, #-7                     ; assign to variable current
+
+    LDR R0, R5, #-8                     ; load local variable 'sum'
+    ADD R1, R5, #-7
+    LDR R1, R1, #0                      ; dereference struct pointer
+    ADD R2, R1, #0                      ; calculate index into struct
+    LDR R2, R2, #0                      ; load element from struct
+    ADD R0, R0, R2
+    STR R0, R5, #-8                     ; assign to variable sum
+
+    LDR R0, R5, #-8                     ; load local variable 'sum'
+    STI R0, RETURN_SLOT                 ; write return value from main
     HALT
 
 

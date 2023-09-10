@@ -1,25 +1,25 @@
 use core::fmt;
+use std::ops::Deref;
 
 use lex_parse::{context::{InternedType, InternedString, Context}, ast::ASTNodeHandle, error::AnalysisError, types::TypePrintable};
-use slotmap::SparseSecondaryMap;
+use slotmap::{SparseSecondaryMap, SlotMap};
 
-
-pub struct STScope {
+pub struct Scope {
     pub next_param_slot: i32,
     pub next_variable_slot: i32,
-    pub var_entries: Vec<Declaration>,
+    pub declarations: Vec<Declaration>,
     pub is_global: bool,
-    // tag_entries: Vec<Declaration>, TODO
+    pub records: Vec<Record>
     // label_entries: TODO
 }
 
-
-impl STScope {
-    pub fn new(next_param_slot: i32, next_variable_slot: i32) -> STScope {
-        STScope {
+impl Scope {
+    pub fn new(next_param_slot: i32, next_variable_slot: i32) -> Scope {
+        Scope {
             next_param_slot,
             next_variable_slot,
-            var_entries: Vec::new(),
+            declarations: Vec::new(),
+            records: Vec::new(),
             is_global: false,
         }
     }
@@ -47,40 +47,30 @@ pub struct Declaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
-    pub fields: Vec<Declaration>,
-}
-
-pub(crate) struct DeclarationPrintable<'a> {
-    pub(crate) declaration: Declaration,
-    pub(crate) context: &'a Context<'a>
-}
-
-impl fmt::Display for DeclarationPrintable<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let decl = &self.declaration;
-        let type_info = self.context.resolve_type(decl.type_info);
-        write!(f, "size: {}, offset: {}, type_info: {}, kind: {:?}, global: {}", decl.size, decl.offset, 
-        TypePrintable{data: type_info, context: self.context}, decl.kind, decl.is_global) //self.type_info, self.kind)
-    }
+    pub identifier: InternedString,
+    pub size: usize,
+    pub fields: Vec<Declaration>, // Declaration, Offset 
 }
 
 pub struct SymbolTable {
     // Maps Declarations AND symbol refs to Declarations.
+    pub records: Vec<Record>, // This is basically a type. // Global Records only
     pub entries: SparseSecondaryMap<ASTNodeHandle, Declaration>,
-    pub stack: Vec<STScope>, // Reference to a STScope
+    pub stack: Vec<Scope>, // Reference to a Scope
 }
+
 
 impl SymbolTable {
     pub fn new() -> SymbolTable {
-        let mut st = SymbolTable { entries: SparseSecondaryMap::new(), stack: Vec::new()};
-        let mut global_scope = STScope::new(0, 0);
+        let mut st = SymbolTable { entries: SparseSecondaryMap::new(), stack: Vec::new(), records: Vec::new()};
+        let mut global_scope = Scope::new(0, 0);
         global_scope.is_global = true;
         st.stack.push(global_scope);
         st
     }
 
     pub fn search_scope(&mut self, identifier: &InternedString, entry_type: &DeclarationType) -> Option<Declaration> {
-        for entry in self.stack.last().unwrap().var_entries.as_slice() {
+        for entry in self.stack.last().unwrap().declarations.as_slice() {
             if (entry.identifier == *identifier) && (*entry_type == entry.kind) {
                 return Some(entry.clone())
             }
@@ -88,11 +78,21 @@ impl SymbolTable {
         None
     } 
 
+    // TODO: search for structs vs enums vs unions.
+    pub fn search_record(&mut self, identifier: &InternedString) -> Option<Record> {
+        for record in &self.records {
+            if *identifier == record.identifier {
+                return Some(record.clone());
+            }
+        }
+        None
+    }
+
     pub fn search_up(&mut self, identifier: &InternedString, entry_type: &DeclarationType) -> Option<Declaration> {
         let entry = self.search_scope(&identifier, &entry_type);
 
         for scope in self.stack.iter().rev(){
-            for entry in scope.var_entries.as_slice() {
+            for entry in scope.declarations.as_slice() {
                 if *entry_type == DeclarationType::Var || *entry_type == DeclarationType::Param {
                     if (entry.identifier == *identifier) && (entry.kind == DeclarationType::Var || entry.kind == DeclarationType::Param) {
                         return Some(entry.clone())
@@ -113,7 +113,7 @@ impl SymbolTable {
             Err(AnalysisError::AlreadyDeclared(entry.identifier, node))
         }
         else {
-            self.stack.last_mut().unwrap().var_entries.push(entry.clone());
+            self.stack.last_mut().unwrap().declarations.push(entry.clone());
             self.entries.insert(node, entry);
             Ok(())
         }
@@ -128,5 +128,22 @@ impl SymbolTable {
         }
     }
 
+}
 
+
+// Display Things
+
+
+pub(crate) struct DeclarationPrintable<'a> {
+    pub(crate) declaration: Declaration,
+    pub(crate) context: &'a Context<'a>
+}
+
+impl fmt::Display for DeclarationPrintable<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let decl = &self.declaration;
+        let type_info = self.context.resolve_type(decl.type_info);
+        write!(f, "size: {}, offset: {}, type_info: {}, kind: {:?}, global: {}", decl.size, decl.offset, 
+        TypePrintable{data: type_info, context: self.context}, decl.kind, decl.is_global) //self.type_info, self.kind)
+    }
 }

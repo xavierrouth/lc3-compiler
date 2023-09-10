@@ -349,7 +349,7 @@ impl<'a> Parser<'a> {
 
         // Check for semicolon here
         if self.expect_token(TokenKind::OpenBrace) {
-            let body: ASTNodeHandle = self.parse_compound_statement()?;
+            let body: ASTNodeHandle = self.parse_compound_statement(false)?;
 
             let node = ASTNode::FunctionDecl { body, parameters, identifier, return_type };
             Ok(self.ast.nodes.insert(node))
@@ -391,7 +391,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_compound_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
+    fn parse_compound_statement(&mut self, new_scope: bool) -> Result<ASTNodeHandle, ParserError> {
         self.eat_token(TokenKind::OpenBrace)?;
         let mut statements: Vec<ASTNodeHandle> = Vec::new();
 
@@ -402,7 +402,7 @@ impl<'a> Parser<'a> {
 
         self.eat_token(TokenKind::CloseBrace)?;
 
-        let node = ASTNode::CompoundStmt { statements: statements, new_scope: true };
+        let node = ASTNode::CompoundStmt { statements, new_scope};
         Ok(self.ast.nodes.insert(node))
 
     }
@@ -499,7 +499,7 @@ impl<'a> Parser<'a> {
 
         // If part
         let if_branch= if self.expect_token(TokenKind::OpenBrace) {
-            self.parse_compound_statement()?
+            self.parse_compound_statement(true)?
         }
         else {
             let tmp = self.parse_expression(0)?;
@@ -511,7 +511,7 @@ impl<'a> Parser<'a> {
             self.eat_token(TokenKind::Else)?;
 
             let else_stmt= if self.expect_token(TokenKind::OpenBrace) {
-                self.parse_compound_statement()?
+                self.parse_compound_statement(true)?
             }
             else {
                 let tmp = self.parse_expression(0)?;
@@ -537,7 +537,7 @@ impl<'a> Parser<'a> {
         let condition = self.parse_expression(0)?;
 
         self.eat_token(TokenKind::CloseParen)?;
-        let body = self.parse_compound_statement()?;
+        let body = self.parse_compound_statement(true)?;
 
         let node = ASTNode::WhileStmt { condition, body};
         Ok(self.ast.nodes.insert(node))
@@ -563,7 +563,7 @@ impl<'a> Parser<'a> {
 
         self.eat_token(TokenKind::CloseParen)?;
 
-        let body = self.parse_compound_statement()?;
+        let body = self.parse_compound_statement(true)?;
 
         let node = ASTNode::ForStmt { initializer, condition, update, body};
         Ok(self.ast.nodes.insert(node))
@@ -694,10 +694,7 @@ impl<'a> Parser<'a> {
 
                 self.get_token();
 
-                // TODO: Test for ternay '?' then ':'
-
-                let rhs = self.parse_expression(r_bp)?;
-
+                // TODO: Test for ternary '?' then ':'
                 let op: BinaryOpType = match token.kind {
                     TokenKind::Dot => BinaryOpType::DotAccess,
                     TokenKind::Arrow => BinaryOpType::PointerAccess,
@@ -718,6 +715,13 @@ impl<'a> Parser<'a> {
                     _ => {return Err(ParserError::UnknownError)}
                 };
 
+                let rhs = if op == BinaryOpType::DotAccess || op == BinaryOpType::PointerAccess {
+                    self.parse_field_ref()?
+                }
+                else {
+                    self.parse_expression(r_bp)?
+                };
+
                 let node = ASTNode::BinaryOp { op, right: rhs, left: lhs };
                 lhs = self.ast.nodes.insert(node);
                 continue;
@@ -731,6 +735,21 @@ impl<'a> Parser<'a> {
 
     }
 
+    fn parse_field_ref(&mut self) -> Result<ASTNodeHandle, ParserError> { 
+        if let TokenKind::Identifier(identifier) = self.peek_token().kind {
+            let token = self.get_token();
+            
+            let node = ASTNode::FieldRef {identifier: identifier};
+            
+            // TOOD: Write helper function that takes node and token and does this for you:
+            let node_h = self.ast.nodes.insert(node);
+            self.context.map_token(node_h, token);
+            Ok(node_h)
+        }
+        else {
+            return Err(ParserError::GeneralError("Expected symbol.".to_string(), Some(self.prev_token())))
+        }
+    }
 
     fn prefix_binding_power(&self, op: &TokenKind) -> Option<((), u8)> {
         match op {
@@ -797,8 +816,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_symbol_ref(&mut self) -> Result<ASTNodeHandle, ParserError> {
-
-
         if let TokenKind::Identifier(identifier) = self.peek_token().kind {
             let token = self.get_token();
             

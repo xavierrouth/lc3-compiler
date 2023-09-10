@@ -1,7 +1,6 @@
-use core::fmt;
-use std::cell::RefCell;
+use core::{fmt, panic};
 use std::fmt::Display;
-use std::rc::Rc;
+
 
 use slotmap::{SparseSecondaryMap, SecondaryMap};
 
@@ -10,11 +9,10 @@ use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{Context, InternedType, InternedString};
 use lex_parse::types::{Type, DeclaratorPart, TypeSpecifier, StorageQual, Qualifiers, CType, TypePrintable};
 
-use crate::symbol_table::SymbolTable;
-
+use crate::symbol_table::{SymbolTable, Declaration};
 
 pub struct Typecheck<'a> {
-    symbol_table: &'a SymbolTable, // 
+    symbol_table: &'a mut SymbolTable, // 
     ast: &'a AST,
 
     pub types: SecondaryMap<ASTNodeHandle, InternedType>,
@@ -69,6 +67,8 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
             },
             //ASTNode::FunctionCall { symbol_ref, arguments } => todo!(),
             ASTNode::SymbolRef { identifier } => {
+                let type_info = self.symbol_table.entries.get(*node_h).unwrap().type_info;
+                self.types.insert(*node_h, type_info);
                 self.try_array_decay(node_h) // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
                 //LR::LValue
             },
@@ -138,6 +138,58 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                         }
                         LR::LValue
                     },
+                    BinaryOpType::PointerAccess => {
+                        // TODO: Assert that lhs is a lvalue.
+                        // Extra dumb dumb stuff.
+                        let Some(left_type) = self.types.get(left) else {
+                            panic!();
+                        };
+                        let Some(CType::Struct(type_identifier)) = self.context.resolve_type(*left_type).specifier.ctype else {
+                            todo!()
+                        };
+                        let Some(record) = self.symbol_table.search_record(&type_identifier).clone() else {
+                            // TODO: Error Out.
+                            println!("error: unable to find declaration");  
+                            todo!();
+                        };
+                        let ASTNode::FieldRef { identifier } = self.get_node(&right).clone() else {
+                            panic!();
+                        }; 
+                    
+                        for field in record.fields {
+                            if identifier == field.identifier {
+                                self.symbol_table.entries.insert(right, field);
+                            }
+                        };
+                        LR::LValue
+                    }
+                    BinaryOpType::DotAccess => {
+                        // TODO: Assert that lhs is an rvalue.
+                        // Extra dumb dumb stuff.
+                        let Some(left_type) = self.types.get(left) else {
+                            panic!();
+                        };
+                        let Some(CType::Struct(type_identifier)) = self.context.resolve_type(*left_type).specifier.ctype else {
+                            todo!()
+                        };
+                        let Some(record) = self.symbol_table.search_record(&type_identifier) else {
+                            // TODO: Error Out.
+                            println!("error: unable to find declaration");  
+                            todo!();
+                        };
+                        let ASTNode::FieldRef { identifier } = self.get_node(&right).clone() else {
+                            panic!();
+                        }; 
+                    
+                        for field in record.fields {
+                            if identifier == field.identifier {
+                                self.symbol_table.entries.insert(right, field);
+                            }
+                            
+                        };
+                        LR::LValue
+
+                    }
                     _ => {
                         // Convert lvalues to Rvalues
                         match self.lr.get(right).unwrap() {
@@ -150,6 +202,7 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                         }
                         LR::RValue 
                     }
+
                     
                 }
                 // Unless its a array index, then you can get an Lvalue from that
@@ -172,8 +225,8 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
 }
 
 impl <'a, 'ast> Typecheck<'ast> {
-    pub fn new(symbol_table: &'a SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
-        Typecheck { symbol_table, ast, types: SecondaryMap::new(), lr: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
+    pub fn new(symbol_table: &'a mut SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
+        Typecheck {symbol_table, ast, types: SecondaryMap::new(), lr: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
     }
 
     pub fn print_casts(&self) -> () {
@@ -209,7 +262,9 @@ impl <'a, 'ast> Typecheck<'ast> {
 
     fn try_array_decay(& mut self, node_h: &ASTNodeHandle) -> LR {
         // Assert that this is a symbol ref.
-        let symbol = self.symbol_table.entries.get(*node_h).unwrap();
+        let Some(symbol) = self.symbol_table.entries.get(*node_h) else {
+            return LR::LValue;
+        };
 
         if self.context.resolve_type(symbol.type_info).is_array() {
             self.casts.insert(*node_h, TypeCast::ArrayToPointerDecay);

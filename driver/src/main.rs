@@ -79,7 +79,7 @@ fn main() {
         analyzer.print_symbol_table();
     } 
 
-    let mut typecheck: Typecheck<'_> = Typecheck::new(&analyzer.symbol_table, &ast, &context, &error_handler);
+    let mut typecheck: Typecheck<'_> = Typecheck::new(&mut analyzer.symbol_table, &ast, &context, &error_handler);
 
     typecheck.traverse(root);
 

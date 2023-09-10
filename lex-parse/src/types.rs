@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{hash::Hash, default, fmt::write};
 
-use crate::{ast::RecordType, context::{InternedString, Context}};
+use crate::{ast::RecordType, context::{InternedString, Context, TypeInterner}};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Qualifiers {
@@ -31,6 +31,10 @@ pub enum CType {
     Struct(InternedString),
     Enum(InternedString),
 }
+
+//pub struct TypeContext {
+//    pub interner: RefCell<TypeInterner>
+//}
 
 impl Default for Qualifiers {
     fn default() -> Self {
@@ -73,9 +77,9 @@ impl fmt::Display for TypeSpecifierPrintable<'_> {
             
             None => write!(f, "{}", self.specifier.qualifiers),
         }
-       
     }
 }
+
 // Weird hackiness going on here:
 #[derive(Debug, Clone, Default)]
 pub struct TypeSpecifier {
@@ -154,6 +158,15 @@ impl Type {
             _ => false
         }
     }
+
+    pub fn is_record(&self) -> bool {
+        match self.specifier.ctype{
+            Some(CType::Struct(_)) |
+            Some(CType::Enum(_)) => true,
+            _ => false,
+        }
+    }
+
 }
 
 
