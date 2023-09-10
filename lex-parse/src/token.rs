@@ -88,7 +88,8 @@ pub enum TokenKind {
     Struct,
     Union,
 
-    
+    // ===== Custom =====
+    Null,
 
     // Helper
     EOF

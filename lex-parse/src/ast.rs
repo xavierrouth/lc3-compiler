@@ -71,6 +71,7 @@ impl Deref for ASTNodeHandle {
         self
     }
 }
+
 // SlotMap is just an arena allocator
 pub struct AST {
     pub nodes: SlotMap<ASTNodeHandle, ASTNode>,
@@ -131,10 +132,13 @@ pub enum ASTNode {
         identifier: InternedString,
         //type_info: TypeInfo<'a>,
     },
+    FieldRef {
+        identifier: InternedString,
+    },
     BinaryOp {
         op: BinaryOpType,
-        right: ASTNodeHandle,
         left: ASTNodeHandle,
+        right: ASTNodeHandle,
     },
     UnaryOp {
         op: UnaryOpType,
@@ -217,6 +221,9 @@ impl Display for ASTNodePrintable<'_> {
             },
             ASTNode::SymbolRef { identifier } => {
                 write!(f, "<SymbolRef, {}>", self.context.resolve_string(*identifier))
+            },
+            ASTNode::FieldRef { identifier } => {
+                write!(f, "<FieldRef, {}>", self.context.resolve_string(*identifier))
             },
             ASTNode::UnaryOp { op, child: _, order } => {
                 write!(f, "<UnaryOp, op: {:?}, preorder: {:?}>", op, order)
@@ -329,6 +336,7 @@ pub trait Vistior<'a> {
             ASTNode::IntLiteral { value: _  } => {}
             ASTNode::SymbolRef { identifier: _} => {}
             ASTNode::FieldDecl { identifier: _, type_info: _ } => {}
+            ASTNode::FieldRef { identifier: _} => {}
 
             ASTNode::Program { declarations } => {
                 for decl in declarations.iter() {

@@ -4,7 +4,7 @@ use slotmap::SecondaryMap;
 // Do a custom string interner eventually.
 use string_interner::{backend::StringBackend, symbol::SymbolU16, StringInterner};
 
-use crate::{types::Type, error::ErrorHandler, ast::ASTNodeHandle, token::Token};
+use crate::{types::{Type}, error::ErrorHandler, ast::ASTNodeHandle, token::Token};
 
 pub type InternedString = SymbolU16;
 

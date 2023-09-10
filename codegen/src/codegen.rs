@@ -336,7 +336,13 @@ impl<'a> Codegen<'a> {
                 }
 
                 self.if_counter += 1;
-            }
+            },
+            ASTNode::RecordDecl { identifier, record_type, fields } => {
+                return;
+            },
+            ASTNode::FieldDecl { identifier, type_info } => {
+                return;
+            },
 
             // Expressions:
             ASTNode::IntLiteral { value } => {self.emit_expression_node(node_h); ()},
@@ -365,6 +371,7 @@ impl<'a> Codegen<'a> {
                 match op {
                     // Lots of annoying stuff here, be prepared
                     BinaryOpType::Assign => {
+                        // Need to check sizes?? of lhs and rhs to know how many assignments to emit. WTf.
 
                         // Handle RHS first:
                         let rhs = self.emit_expression_node(right);
@@ -494,10 +501,51 @@ impl<'a> Codegen<'a> {
                         return reg;
 
                     }
-                    //BinaryOpType::DotAccess => todo!(),
-                    //BinaryOpType::PointerAccess => todo!(),
-                    //BinaryOpType::DotAccess => todo!(),
-                    //BinaryOpType::PointerAccess => todo!(),
+                    BinaryOpType::DotAccess => {
+                        let base = self.emit_expression_node(left);
+                        self.regfile[base.value] = Self::USED;
+                        // Dereference left side.
+
+                        // Calculate offset
+                        let entry = self.symbol_table.entries.get(*right).unwrap();
+
+                        let reg = self.get_empty_reg();
+
+                        emit!(self, Instruction(LC3Inst::AddImm(reg, base, Imm::Int(entry.offset)), Some("calculate index into struct".to_string())));
+                        
+                        let member_name = self.context.resolve_string(entry.identifier);
+                        // Only load if this needs to be an Rvalue, else we just want the address.
+                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                            emit!(self, Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some(format!("load element {member_name} from struct"))));
+                        }
+
+                        self.regfile[base.value] = Self::UNUSED;
+                        self.regfile[reg.value] = Self::USED;
+                        return reg;
+                    }
+                    BinaryOpType::PointerAccess => {
+                        let base = self.emit_expression_node(left);
+                        self.regfile[base.value] = Self::USED;
+                        // Dereference left side.
+                        emit!(self, Instruction(LC3Inst::Ldr(base, base, Imm::Int(0)), Some("dereference struct pointer".to_string())));
+
+                        // Calculate offset
+                        let entry = self.symbol_table.entries.get(*right).unwrap();
+
+                        let reg = self.get_empty_reg();
+
+                        emit!(self, Instruction(LC3Inst::AddImm(reg, base, Imm::Int(entry.offset)), Some("calculate index into struct".to_string())));
+
+                        let member_name = self.context.resolve_string(entry.identifier);
+                        // Only load if this needs to be an Rvalue, else we just want the address.
+                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                            emit!(self, Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some(format!("load element {member_name} from struct"))));
+                        }
+
+                        self.regfile[base.value] = Self::UNUSED;
+                        self.regfile[reg.value] = Self::USED;
+                        return reg;
+                    }
                     _ => {
                         println!("error: This feature is currently unimplemeneted.");
                         println!("{}", ASTNodePrintable{node: node.clone(), context: self.context});
