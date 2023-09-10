@@ -709,7 +709,10 @@ impl<'a> Codegen<'a> {
                 }
                 else {
                     // This is an Lvalue, just generate the Address
-                    emit!(self, Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), None));
+                    let identifier = self.context.resolve_string(entry.identifier);
+                    emit!(self, Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some(
+                        format!("calculate address of '{identifier}'"))));
+                    
 
                 }
                 self.regfile[reg.value] = Self::USED;
