@@ -2,7 +2,7 @@
 
 C-LC3-Compiler is a modern, student built, C compiler targeting the LC3 Assembly language as described in *Introduction to Computing* by Dr. Yale Patt and Dr. Sanjay Patel. This tool is mainly for educational purposes, and is specifically meant to help students taking ECE 220 - Computer Systems & Programming at UIUC, however it should be relevant and useful to any student learning LC3 Assembly. The calling conventions implemented by the compiler mirror the conventions described in *Introduction to Computing*, any discrepancies are bugs.
 
-This repository contains the source code for the compiler, as well as various tests. Currently, only a subset of the C language is supported. Some important features we are working on include:
+This repository contains the source code for the compiler, as well as various tests. Currently, only a subset of the C language is supported. Some important features I am working on include:
 
 - String literals
 - C operator subroutines (multiplication, division, etc.)
@@ -13,7 +13,7 @@ This repository contains the source code for the compiler, as well as various te
 - Function Pointers
 - C Preprocessor
 
-Some compiler explorer integration features we are working on include:
+Some compiler explorer integration features I am working on include:
 
 - Assembly documentation
 - Instruction highlighting in source
@@ -21,15 +21,12 @@ Some compiler explorer integration features we are working on include:
 
 ### Build Instructions
 To build the compiler locally,
-1. Ensure you have CMake, and clang installed. 
-2. `git clone https://github.com/xavierrouth/C-LC3-Compiler.git`
-3. `cd C-LC3-Compiler`
-4. `mkdir build`
-5. `cd build`
-6. `cmake ..`
-7. `make`
+1. Ensure you have Cargo installed. 
+2. `git clone https://github.com/xavierrouth/lc3-compiler.git`
+3. `cd lc3-compiler`
+4. `cargo install --path driver`
 
-To use the compiler without building from source we recommend using https://godbolt.org/.
+To use the compiler without building from source I recommend using https://godbolt.org/.
 
 ### Usage Gudie
 To run the compiler, use `lc3-compile`:
