@@ -89,7 +89,22 @@ impl<'a> Codegen<'a> {
                 emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
                 emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
             },
-            _ => panic!()
+            /* 
+            BinaryOpType::EqualEqual => {
+                emit!(self, Instruction(LC3Inst::Not(right, right), Some("evaluate '=='".to_string())));
+                emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
+                emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
+            },
+            BinaryOpType::NotEqual => {
+                emit!(self, Instruction(LC3Inst::Not(right, right), Some("evaluate '!='".to_string())));
+                emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
+                emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
+            } */
+            _ => {
+                println!("error: This feature is currently unimplemeneted.");
+                println!("{}", ASTNodePrintable{node: node.clone(), context: self.context});
+                std::process::exit(1);
+            }
         }
 
         self.regfile[right.value] = Codegen::UNUSED;
