@@ -89,17 +89,24 @@ impl<'a> Codegen<'a> {
                 emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
                 emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
             },
-            /* 
             BinaryOpType::EqualEqual => {
                 emit!(self, Instruction(LC3Inst::Not(right, right), Some("evaluate '=='".to_string())));
                 emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
                 emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
-            },
+                emit!(self, Instruction(LC3Inst::BrImm(false, true, false, Imm::Int(2)), None)); // if zero,
+                emit!(self, Instruction(LC3Inst::AndImm(ret, ret, Imm::Int(0)), Some("evaluate to '0' or 'false'".to_string())));
+                emit!(self, Instruction(LC3Inst::BrImm(true, true, true, Imm::Int(3)), None));
+                emit!(self, Instruction(LC3Inst::AddImm(ret, ret, Imm::Int(1)), None));
+            }
             BinaryOpType::NotEqual => {
                 emit!(self, Instruction(LC3Inst::Not(right, right), Some("evaluate '!='".to_string())));
                 emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
                 emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
-            } */
+                emit!(self, Instruction(LC3Inst::BrImm(true, false, true, Imm::Int(2)), None)); // if not zero,
+                emit!(self, Instruction(LC3Inst::AndImm(ret, ret, Imm::Int(0)), Some("evaluate to '0' or 'false'".to_string())));
+                emit!(self, Instruction(LC3Inst::BrImm(true, true, true, Imm::Int(3)), None));
+                emit!(self, Instruction(LC3Inst::AddImm(ret, ret, Imm::Int(1)), None));
+            }
             _ => {
                 println!("error: This feature is currently unimplemeneted.");
                 println!("{}", ASTNodePrintable{node: node.clone(), context: self.context});
@@ -292,7 +299,7 @@ impl<'a> Codegen<'a> {
 
                 let condition = self.emit_expression_node(condition);
                 self.reset_regfile();
-                emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
+                //emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
 
                 emit!(self, Instruction(LC3Inst::Br(true, true, false, label_end.clone()), Some("if false, skip over loop body".to_string())));
 
@@ -308,19 +315,38 @@ impl<'a> Codegen<'a> {
                 self.for_counter += 1;
 
             }
-            /*
             
-            ASTNode::WhileStmt { condition, body } => todo!(),
             
-            ASTNode::DeclStmt { declarations } => todo!(),
-            ASTNode::InlineAsm { assembly } => todo!(),
-             */
+            ASTNode::WhileStmt { condition, body } => {
+                
+
+                let func_name = self.context.resolve_string(self.scope);
+                let name = format!("{func_name}.while.{}", self.while_counter);
+                let label_header = Label::Label(format!("{name}"));
+                let label_end = Label::Label(format!("{name}.end"));
+
+                emit!(self, Newline);
+                emit!(self, HeaderLabel(label_header.clone(), Some("while loop begin".to_string())));
+                let condition = self.emit_expression_node(condition);
+                self.reset_regfile();
+                emit!(self, Instruction(LC3Inst::Br(false, false, true, label_end.clone()), Some("if false, skip to end".to_string())));
+                self.emit_ast_node(body);
+                //emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
+                emit!(self, Instruction(LC3Inst::Br(true, true, true, label_header), Some("test loop condition".to_string())));
+                emit!(self, HeaderLabel(label_end, Some("while loop end".to_string())));
+
+                self.while_counter += 1;
+            }
+            
+            //ASTNode::DeclStmt { declarations } => todo!(),
+            //ASTNode::InlineAsm { assembly } => todo!(),
+             
             ASTNode::IfStmt { condition, if_branch, else_branch } => {
                 // TOOD: If this is a simple condition, then we don't need to load the condition into NZP.
                 let condition = self.emit_expression_node(condition);
                 self.reset_regfile();
                 emit!(self, Newline);
-                emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
+                //emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
 
                 let func_name = self.context.resolve_string(self.scope);
 

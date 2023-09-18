@@ -2,7 +2,8 @@
     "rust-analyzer.linkedProjects": [
         "./lex-parse/Cargo.toml",
         "./codegen/Cargo.toml",
-        "./analysis/Cargo.toml"
+        "./analysis/Cargo.toml",
+        "./intermediate/Cargo.toml"
     ],
     "terminal.integrated.env.linux": {
         "PATH" : "${env:PATH}:${workspaceFolder}/target/release:${workspaceFolder}/csmith/build/bin"
