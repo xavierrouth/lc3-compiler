@@ -1,7 +1,7 @@
 use std::fmt::format;
 use slotmap::{SparseSecondaryMap};
 
-use ::analysis::{symbol_table::{SymbolTable, DeclarationType}, typecheck::TypeCast};
+use ::analysis::{symbol_table::{SymbolTable, DeclRef}, typecheck::TypeCast};
 use lex_parse::{ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType, ASTNodePrintable}, types::StorageQual};
 use analysis::{analysis};
 use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Bundle::*, LC3Inst, Immediate as Imm, Label, LC3Directive};
@@ -17,6 +17,7 @@ pub struct Codegen<'a> {
 
     // External Information
     symbol_table: SymbolTable,
+    uses: SparseSecondaryMap<ASTNodeHandle, DeclRef>,
     printer: &'a mut AsmPrinter, 
     ast: &'a AST,
     context: &'a Context<'a>,
@@ -64,10 +65,10 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn emit_condition_node(&mut self, node_h: &ASTNodeHandle) -> Register {
-        let node = self.ast.get_node(node_h);
+    fn emit_condition_node(&mut self, node_h: ASTNodeHandle) -> Register {
+        let node = self.ast.get(node_h);
 
-        let (op, left, right) = match node {
+        let (op, left, right) = match *node {
             ASTNode::BinaryOp{op, left, right} => (op, left, right),
             _ => panic!()
         };
@@ -119,10 +120,10 @@ impl<'a> Codegen<'a> {
         return ret;
     }
 
-
-    pub fn emit_ast_node(&mut self, node_h: &ASTNodeHandle) {
+    pub fn emit_ast_node(&mut self, node_h: ASTNodeHandle) {
         // If counter, while_counter, for_counter etc..
-        let node = self.ast.get_node(node_h);
+        let node = self.ast.get(node_h);
+
         match node {
             ASTNode::Program { declarations } => {
 
@@ -131,7 +132,7 @@ impl<'a> Codegen<'a> {
                 emit!(self, Instruction(LC3Inst::Jsr(Label::Label("main".to_string())), None));
 
                 emit!(self, Newline);
-                for decl in declarations {
+                for &decl in declarations {
                     self.emit_ast_node(decl);
                 }
                 //emit!(self, Instruction(LC3Inst::Halt, None));
@@ -147,7 +148,7 @@ impl<'a> Codegen<'a> {
 
                 if function == "main" {
                     emit!(self, HeaderLabel(Label::Label(identifier.clone()), None));
-                    self.emit_ast_node(body);
+                    self.emit_ast_node(*body);
                     return;
                 }
                 
@@ -166,7 +167,7 @@ impl<'a> Codegen<'a> {
 
                 emit!(self, Newline);
                 emit!(self, SectionComment("function body:".to_string()));
-                self.emit_ast_node(body);
+                self.emit_ast_node(*body);
 
                 let teardown_label = format!("{identifier}.teardown").to_string();
 
@@ -190,13 +191,13 @@ impl<'a> Codegen<'a> {
                 let identifier = self.context.resolve_string(*identifier);
                 
 
-                let entry = self.symbol_table.entries.get(*node_h).unwrap();
+                let entry = self.symbol_table.entries.get(node_h).unwrap();
                 // Global Variable
                 if entry.is_global {
                     let value = match initializer {
                         Some(initializer) => {
                             // Need to do constant evaluation.
-                            if let ASTNode::IntLiteral { value } = self.ast.get_node(initializer) {
+                            if let ASTNode::IntLiteral { value } = self.ast.get(*initializer) {
                                 *value
                             }
                             else {0}
@@ -216,7 +217,7 @@ impl<'a> Codegen<'a> {
                     let value = match initializer {
                         Some(initializer) => {
                             // Need to do constant evaluation.
-                            if let ASTNode::IntLiteral { value } = self.ast.get_node(initializer) {
+                            if let ASTNode::IntLiteral { value } = self.ast.get(*initializer) {
                                 *value
                             }
                             else {0}
@@ -232,8 +233,8 @@ impl<'a> Codegen<'a> {
                     match initializer {
                         Some(initializer) => {
                             // Need to do constant evaluation.
-                            let reg = self.emit_expression_node(initializer);
-                            let entry = self.symbol_table.entries.get(*node_h).unwrap();
+                            let reg = self.emit_expression_node(*initializer);
+                            let entry = self.symbol_table.entries.get(node_h).unwrap();
                             self.regfile[reg.value] = Self::UNUSED;
 
                             emit!(self, Instruction(LC3Inst::Str(reg, Self::R5, Imm::Int(entry.offset)), Some(format!("initialize '{identifier}'"))));
@@ -246,20 +247,22 @@ impl<'a> Codegen<'a> {
             // Statements:
             ASTNode::Ternary { first, second, third } => todo!(),
             ASTNode::CompoundStmt { statements, new_scope } => {
-                for stmt in statements {
+                for &stmt in statements {
                     self.emit_ast_node(stmt);
                     emit!(self, Newline);
                     self.reset_regfile();
                 }
             },
-            ASTNode::ExpressionStmt { expression } => todo!(),
+            ASTNode::ExpressionStmt { expression } => {
+                self.emit_ast_node(*expression);
+            }
             ASTNode::ReturnStmt { expression } => {
                 let function = self.context.resolve_string(self.scope);
 
                 if function == "main" {
                     match expression {
                         Some(expression) => {
-                            let reg = self.emit_expression_node(expression);
+                            let reg = self.emit_expression_node(*expression);
                             emit!(self, Instruction(LC3Inst::Sti(reg, Label::Label("RETURN_SLOT".to_string())), Some("write return value from main".to_string())));
                             emit!(self, Instruction(LC3Inst::Halt, None));
                         },
@@ -268,7 +271,7 @@ impl<'a> Codegen<'a> {
                 }
                 else {
                     match expression {
-                        Some(expression) => {
+                        &Some(expression) => {
                             let reg = self.emit_expression_node(expression);
                             emit!(self, Instruction(LC3Inst::Str(reg, Self::R5, Imm::Int(3)), Some("write return value, always R5 + 3".to_string())));
                         },
@@ -292,21 +295,21 @@ impl<'a> Codegen<'a> {
                 let label_header = Label::Label(format!("{name}"));
                 let label_end = Label::Label(format!("{name}.end"));
 
-                self.emit_ast_node(initializer);
+                self.emit_ast_node(*initializer);
                 self.reset_regfile();
 
                 emit!(self, HeaderLabel(label_header.clone(), Some("test condition".to_string())));
 
-                let condition = self.emit_expression_node(condition);
+                let condition = self.emit_expression_node(*condition);
                 self.reset_regfile();
                 //emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
 
                 emit!(self, Instruction(LC3Inst::Br(true, true, false, label_end.clone()), Some("if false, skip over loop body".to_string())));
 
-                self.emit_ast_node(body);
+                self.emit_ast_node(*body);
                 
                 emit!(self, SectionComment("update expression".to_string()));
-                self.emit_ast_node(update);
+                self.emit_ast_node(*update);
                 self.reset_regfile();
 
                 emit!(self, Instruction(LC3Inst::Br(true, true, true, label_header), Some("loop".to_string())));
@@ -327,10 +330,10 @@ impl<'a> Codegen<'a> {
 
                 emit!(self, Newline);
                 emit!(self, HeaderLabel(label_header.clone(), Some("while loop begin".to_string())));
-                let condition = self.emit_expression_node(condition);
+                let condition = self.emit_expression_node(*condition);
                 self.reset_regfile();
                 emit!(self, Instruction(LC3Inst::Br(false, false, true, label_end.clone()), Some("if false, skip to end".to_string())));
-                self.emit_ast_node(body);
+                self.emit_ast_node(*body);
                 //emit!(self, Instruction(LC3Inst::AndReg(condition, condition, condition), Some("load condition into NZP".to_string())));
                 emit!(self, Instruction(LC3Inst::Br(true, true, true, label_header), Some("test loop condition".to_string())));
                 emit!(self, HeaderLabel(label_end, Some("while loop end".to_string())));
@@ -341,7 +344,7 @@ impl<'a> Codegen<'a> {
             //ASTNode::DeclStmt { declarations } => todo!(),
             //ASTNode::InlineAsm { assembly } => todo!(),
              
-            ASTNode::IfStmt { condition, if_branch, else_branch } => {
+            &ASTNode::IfStmt { condition, if_branch, else_branch } => {
                 // TOOD: If this is a simple condition, then we don't need to load the condition into NZP.
                 let condition = self.emit_expression_node(condition);
                 self.reset_regfile();
@@ -400,14 +403,14 @@ impl<'a> Codegen<'a> {
         
     }
 
-    fn emit_expression_node(&mut self, node_h: &ASTNodeHandle) -> Register {
+    fn emit_expression_node(&mut self, node_h: ASTNodeHandle) -> Register {
         
-        let node = self.ast.get_node(node_h);
+        let node = self.ast.get(node_h);
 
         match node {
             ASTNode::BinaryOp { op, right, left } => {
-                let left_node = self.ast.get_node(left);
-                let right_node = self.ast.get_node(right);
+                let left_node = self.ast.get(*left);
+                let right_node = self.ast.get(*right);
 
                 match op {
                     // Lots of annoying stuff here, be prepared
@@ -415,14 +418,14 @@ impl<'a> Codegen<'a> {
                         // Need to check sizes?? of lhs and rhs to know how many assignments to emit. WTf.
 
                         // Handle RHS first:
-                        let rhs = self.emit_expression_node(right);
+                        let rhs = self.emit_expression_node(*right);
                         self.regfile[rhs.value] = Self::USED;
 
                         // Handle LHS now
                         
                         // OPTIMIZATION:
                         if let ASTNode::SymbolRef { identifier } = left_node {
-                            let entry = self.symbol_table.entries.get(*left).unwrap();
+                            let Some(DeclRef::LocalVar())entry = self.uses.get(*left).unwrap();
                             
                             let identifier = self.context.resolve_string(entry.identifier);
 
@@ -441,7 +444,7 @@ impl<'a> Codegen<'a> {
                         }
                         else {
                             // In general, lhs should evaluate to an adrress.
-                            let lhs = self.emit_expression_node(left);
+                            let lhs = self.emit_expression_node(*left);
                             // Treat LHS as address
                             emit!(self, Instruction(
                                 LC3Inst::Str(rhs, lhs, Imm::Int(0)), None)); // Store RHS into LHS as address
@@ -453,7 +456,7 @@ impl<'a> Codegen<'a> {
                     BinaryOpType::Add => {
                         if let ASTNode::IntLiteral { value } = left_node {
                             if *value <= 15 {
-                                let reg = self.emit_expression_node(right);
+                                let reg = self.emit_expression_node(*right);
                                 emit!(self, Instruction(
                                     LC3Inst::AddImm(reg, reg, Imm::Int(*value)), None));
                                 self.regfile[reg.value] = Self::USED;
@@ -462,7 +465,7 @@ impl<'a> Codegen<'a> {
                         }
                         else if let ASTNode::IntLiteral { value } = right_node {
                             if *value <= 15 {
-                                let reg = self.emit_expression_node(left);
+                                let reg = self.emit_expression_node(*left);
                                 emit!(self, Instruction(
                                     LC3Inst::AddImm(reg, reg, Imm::Int(*value)), None));
                                 self.regfile[reg.value] = Self::USED;
@@ -470,9 +473,9 @@ impl<'a> Codegen<'a> {
                             } 
                         }
                         
-                        let left = self.emit_expression_node(left);
+                        let left = self.emit_expression_node(*left);
                         self.regfile[left.value] = Self::USED;
-                        let right = self.emit_expression_node(right);
+                        let right = self.emit_expression_node(*right);
                         
                         emit!(self, Instruction(
                             LC3Inst::AddReg(left, left, right), None));
@@ -483,7 +486,7 @@ impl<'a> Codegen<'a> {
                     }
                     BinaryOpType::Sub => {
                         if let ASTNode::IntLiteral { value } = right_node {
-                            let reg = self.emit_expression_node(left);
+                            let reg = self.emit_expression_node(*left);
                             self.regfile[reg.value] = Self::USED;
 
                             emit!(self, Instruction(
@@ -492,9 +495,9 @@ impl<'a> Codegen<'a> {
                             return reg;
                         }
                         else {
-                            let left = self.emit_expression_node(left);
+                            let left = self.emit_expression_node(*left);
                             self.regfile[left.value] = Self::USED;
-                            let right = self.emit_expression_node(right);
+                            let right = self.emit_expression_node(*right);
                             emit!(self, Instruction(LC3Inst::Not(right, right), None));
                             emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
                             emit!(self, Instruction(LC3Inst::AddReg(left, right, left), None));
@@ -522,9 +525,9 @@ impl<'a> Codegen<'a> {
 
                     // Pointer Access
                     BinaryOpType::ArrayAccess => {
-                        let base = self.emit_expression_node(left);
+                        let base = self.emit_expression_node(*left);
                         self.regfile[base.value] = Self::USED;
-                        let offset = self.emit_expression_node(right);
+                        let offset = self.emit_expression_node(*right);
                         self.regfile[offset.value] = Self::USED;
 
                         let reg = self.get_empty_reg();
@@ -532,7 +535,7 @@ impl<'a> Codegen<'a> {
                         emit!(self, Instruction(LC3Inst::AddReg(reg, base, offset), Some("calculate index into array".to_string())));
 
                         // Only load if this needs to be an Rvalue, else we just want the address.
-                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                        if self.casts.get(node_h) == Some(&TypeCast::LvalueToRvalue) {
                             emit!(self, Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some("load element from array".to_string())));
                         }
 
@@ -543,7 +546,7 @@ impl<'a> Codegen<'a> {
 
                     }
                     BinaryOpType::DotAccess => {
-                        let base = self.emit_expression_node(left);
+                        let base = self.emit_expression_node(*left);
                         self.regfile[base.value] = Self::USED;
                         // Dereference left side.
 
@@ -556,7 +559,7 @@ impl<'a> Codegen<'a> {
                         
                         let member_name = self.context.resolve_string(entry.identifier);
                         // Only load if this needs to be an Rvalue, else we just want the address.
-                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                        if self.casts.get(node_h) == Some(&TypeCast::LvalueToRvalue) {
                             emit!(self, Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some(format!("load element {member_name} from struct"))));
                         }
 
@@ -565,7 +568,7 @@ impl<'a> Codegen<'a> {
                         return reg;
                     }
                     BinaryOpType::PointerAccess => {
-                        let base = self.emit_expression_node(left);
+                        let base = self.emit_expression_node(*left);
                         self.regfile[base.value] = Self::USED;
                         // Dereference left side.
                         emit!(self, Instruction(LC3Inst::Ldr(base, base, Imm::Int(0)), Some("dereference struct pointer".to_string())));
@@ -579,7 +582,7 @@ impl<'a> Codegen<'a> {
 
                         let member_name = self.context.resolve_string(entry.identifier);
                         // Only load if this needs to be an Rvalue, else we just want the address.
-                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                        if self.casts.get(node_h) == Some(&TypeCast::LvalueToRvalue) {
                             emit!(self, Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some(format!("load element {member_name} from struct"))));
                         }
 
@@ -597,7 +600,7 @@ impl<'a> Codegen<'a> {
             ASTNode::UnaryOp { op, child, order } => {
                 match op {
                     UnaryOpType::Address => {
-                        let child_node = self.ast.get_node(child);
+                        let child_node = self.ast.get(*child);
                         // Assert that it is an lvalue. (semant checks this)
                         let entry = self.symbol_table.entries.get(*child).unwrap();
                         let reg = self.get_empty_reg();
@@ -619,23 +622,23 @@ impl<'a> Codegen<'a> {
                     UnaryOpType::Dereference => { // Dereference alwqasy results in an L-value.
                         // Treat whatever is being dereferenced as a memory address, and just load from the address.
                         
-                        let reg = self.emit_expression_node(child);
+                        let reg = self.emit_expression_node(*child);
                        
                         // TBH i don't know why this works.
-                        if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                        if self.casts.get(node_h) == Some(&TypeCast::LvalueToRvalue) {
                             emit!(self, Instruction(LC3Inst::Ldr(reg, reg, Imm::Int(0)), Some("dereference".to_string())));
                         }
                         //
                         return reg;
                     }
                     UnaryOpType::Negate => {
-                        let reg: Register = self.emit_expression_node(child);
+                        let reg: Register = self.emit_expression_node(*child);
                         emit!(self, Instruction(LC3Inst::Not(reg, reg), None));
                         emit!(self, Instruction(LC3Inst::AddImm(reg, reg, Imm::Int(1)), None));
                         return reg;
                     }
                     UnaryOpType::Positive => {
-                        return self.emit_expression_node(child);
+                        return self.emit_expression_node(*child);
                     },
                     _ => {
                         println!("error: This feature is currently unimplemeneted.");
@@ -668,7 +671,7 @@ impl<'a> Codegen<'a> {
 
                 // Push arguments right to left.
                 for arg in arguments.into_iter().rev() {
-                    let arg_reg = self.emit_expression_node(arg);
+                    let arg_reg = self.emit_expression_node(*arg);
                     emit!(self, Instruction(LC3Inst::AddImm(Self::R6, Self::R6, Imm::Int(-1)), None));
                     emit!(self, Instruction(LC3Inst::Str(arg_reg, Self::R6, Imm::Int(0)), Some("push argument to stack.".to_string())));
                     emit!(self, Newline);
@@ -677,7 +680,7 @@ impl<'a> Codegen<'a> {
                 }
 
                 // Todo: Support calling arbitrary memory locations as functions.
-                let entry = self.symbol_table.entries.get(*symbol_ref).unwrap();
+                let entry = self.uses.get(*symbol_ref).unwrap();
 
                 let identifier = self.context.resolve_string(entry.identifier);
                 emit!(self, Newline);
@@ -705,18 +708,19 @@ impl<'a> Codegen<'a> {
                 return ret;
             },
             ASTNode::IntLiteral { value } => {
+                let value = *value;
                 let reg = self.get_empty_reg();
                 emit!(self, Instruction(LC3Inst::AndImm(reg, reg, Imm::Int(0)), None));
-                if *value != 0 {
-                    emit!(self, Instruction(LC3Inst::AddImm(reg, reg, Imm::Int(*value)), None));
+                if value != 0 {
+                    emit!(self, Instruction(LC3Inst::AddImm(reg, reg, Imm::Int(value)), None));
                 }
                 return reg;
             }
             ASTNode::SymbolRef { identifier } => {
-                let entry = self.symbol_table.entries.get(*node_h).unwrap();
+                let entry = self.symbol_table.entries.get(node_h).unwrap();
                 let reg = self.get_empty_reg();
 
-                if self.casts.get(*node_h) == Some(&TypeCast::LvalueToRvalue) {
+                if self.casts.get(node_h) == Some(&TypeCast::LvalueToRvalue) {
                     let identifier = self.context.resolve_string(entry.identifier);
                     
                     /* */
@@ -742,7 +746,7 @@ impl<'a> Codegen<'a> {
                         }
                     }
                 }
-                else if self.casts.get(*node_h) == Some(&TypeCast::ArrayToPointerDecay) {
+                else if self.casts.get(node_h) == Some(&TypeCast::ArrayToPointerDecay) {
                     let identifier = self.context.resolve_string(entry.identifier);
                     // this is an lvalue, just generate the address
                     emit!(self, Instruction(LC3Inst::AddImm(reg, Self::R5, Imm::Int(entry.offset)), Some(

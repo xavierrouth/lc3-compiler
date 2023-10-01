@@ -407,6 +407,13 @@ impl<'a> Parser<'a> {
 
     }
 
+    fn parse_break_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
+        self.eat_token(TokenKind::Break)?;
+        self.eat_token(TokenKind::Semicolon)?;
+        let node = ASTNode::BreakStmt;
+        Ok(self.ast.nodes.insert(node))
+    }
+
     fn parse_statement(&mut self) -> Result<ASTNodeHandle, ParserError> {
         // Accept errors here?
         match self.peek_token().kind {
@@ -415,6 +422,7 @@ impl<'a> Parser<'a> {
             TokenKind::If => self.parse_if_statement(),
             TokenKind::While => self.parse_while_statement(),
             TokenKind::For => self.parse_for_statement(),
+            TokenKind::Break => self.parse_break_statement(),
             _ => { // Thsee don't eat semicolons!
 
                 // Attempt variable declaration
@@ -459,9 +467,11 @@ impl<'a> Parser<'a> {
                         }
                     }
                     _ => {
-                        let stmt = self.parse_expression(0)?;
+                        let expr = self.parse_expression(0)?;
+                        let stmt = ASTNode::ExpressionStmt { expression: expr };
+                        
                         self.eat_token(TokenKind::Semicolon)?;
-                        Ok(stmt)
+                        Ok(self.ast.nodes.insert(stmt))
                     }
                 }
             }

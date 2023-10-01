@@ -9,12 +9,13 @@ use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{Context, InternedType, InternedString};
 use lex_parse::types::{Type, DeclaratorPart, TypeSpecifier, StorageQual, Qualifiers, CType, TypePrintable};
 
-use crate::symbol_table::{SymbolTable, Declaration};
+use crate::symbol_table::{SymbolTable, LocalVarDecl, DeclRef};
 
-pub struct Typecheck<'a> {
+pub struct TypecheckPass<'a> {
     symbol_table: &'a mut SymbolTable, // 
     ast: &'a AST,
 
+    pub uses: SparseSecondaryMap<ASTNodeHandle, DeclRef>,
     pub types: SecondaryMap<ASTNodeHandle, InternedType>,
     pub lr: SecondaryMap<ASTNodeHandle, LR>,
     pub casts: SparseSecondaryMap<ASTNodeHandle, TypeCast>,
@@ -52,23 +53,33 @@ impl Display for LR {
         }
     }
 }
-impl <'a> Vistior<'a> for Typecheck<'a> {
-    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
-        self.ast.get_node(node_h)
+impl <'a> Vistior<'a> for TypecheckPass<'a> {
+    fn get(&self, node_h: ASTNodeHandle) -> &ASTNode {
+        self.ast.get(node_h)
     }
 
-    fn postorder(&mut self, node_h: &ASTNodeHandle) -> () {
-        let node = self.get_node(node_h).clone();
+    fn postorder(&mut self, node_h: ASTNodeHandle) -> () {
+        let node = self.get(node_h).clone();
         // We only need to check expressions really.
         let value = match node {
             ASTNode::IntLiteral { value } => {
-                self.types.insert(*node_h, self.get_int_type());
+                self.types.insert(node_h, self.get_int_type());
                 LR::RValue
             },
             //ASTNode::FunctionCall { symbol_ref, arguments } => todo!(),
             ASTNode::SymbolRef { identifier } => {
-                let type_info = self.symbol_table.entries.get(*node_h).unwrap().type_info;
-                self.types.insert(*node_h, type_info);
+                let Some(entry) = self.uses.get(node_h) else {
+                    panic!() // Fixme.
+                };
+
+                let type_info = match entry {
+                    DeclRef::LocalVar(local) => local.type_info,
+                    DeclRef::Field(field) => field.type_info,
+                    DeclRef::Function(_) => todo!(), // Should be a function ptr type or something.
+                    DeclRef::Global(global) => global.type_info,
+                };
+
+                self.types.insert(node_h, type_info);
                 self.try_array_decay(node_h) // Need to do this on pointer loads, and lvalue field selections, because these could all be arrays.
                 //LR::LValue
             },
@@ -144,21 +155,21 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                         let Some(left_type) = self.types.get(left) else {
                             panic!();
                         };
-                        let Some(CType::Struct(type_identifier)) = self.context.resolve_type(*left_type).specifier.ctype else {
+                        let Some(CType::Struct(type_identifier)) = self.context.resolve_type(left_type).specifier.ctype else {
                             todo!()
                         };
-                        let Some(record) = self.symbol_table.search_record(&type_identifier).clone() else {
+                        let Some(record) = self.symbol_table.search_record(&type_identifier) else {
                             // TODO: Error Out.
                             println!("error: unable to find declaration");  
                             todo!();
                         };
-                        let ASTNode::FieldRef { identifier } = self.get_node(&right).clone() else {
+                        let ASTNode::FieldRef { identifier } = self.get(right).clone() else {
                             panic!();
                         }; 
-                    
-                        for field in record.fields {
-                            if identifier == field.identifier {
-                                self.symbol_table.entries.insert(right, field);
+
+                        for field in record.clone().fields.as_slice() {
+                            if identifier == field.identifier { 
+                                self.uses.insert(right, DeclRef::Field(field.clone()));
                             }
                         };
                         LR::LValue
@@ -169,7 +180,7 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                         let Some(left_type) = self.types.get(left) else {
                             panic!();
                         };
-                        let Some(CType::Struct(type_identifier)) = self.context.resolve_type(*left_type).specifier.ctype else {
+                        let Some(CType::Struct(type_identifier)) = self.context.resolve_type(left_type).specifier.ctype else {
                             todo!()
                         };
                         let Some(record) = self.symbol_table.search_record(&type_identifier) else {
@@ -177,15 +188,14 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
                             println!("error: unable to find declaration");  
                             todo!();
                         };
-                        let ASTNode::FieldRef { identifier } = self.get_node(&right).clone() else {
+                        let ASTNode::FieldRef { identifier } = self.get(right).clone() else {
                             panic!();
                         }; 
                     
-                        for field in record.fields {
-                            if identifier == field.identifier {
-                                self.symbol_table.entries.insert(right, field);
+                        for field in record.clone().fields.as_slice() {
+                            if identifier == field.identifier { 
+                                self.uses.insert(right, DeclRef::Field(field.clone()));
                             }
-                            
                         };
                         LR::LValue
 
@@ -218,20 +228,20 @@ impl <'a> Vistior<'a> for Typecheck<'a> {
             }
             _ => LR::RValue,
         };
-        self.lr.insert(*node_h, value);
+        self.lr.insert(node_h, value);
     }
 
     fn halt(& self) -> bool {false}
 }
 
-impl <'a, 'ast> Typecheck<'ast> {
-    pub fn new(symbol_table: &'a mut SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>,) -> Typecheck<'a> {
-        Typecheck {symbol_table, ast, types: SecondaryMap::new(), lr: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context }
+impl <'a, 'ast> TypecheckPass<'ast> {
+    pub fn new(symbol_table: &'a mut SymbolTable, ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>, uses: SparseSecondaryMap<ASTNodeHandle, DeclRef>,) -> TypecheckPass<'a> {
+        TypecheckPass {symbol_table, ast, types: SecondaryMap::new(), lr: SecondaryMap::new(), casts: SparseSecondaryMap::new(), halt: false, context, uses, }
     }
 
     pub fn print_casts(&self) -> () {
         for (handle, cast) in &self.casts {
-            let node = self.get_node(&handle);
+            let node = self.get(handle);
             match node {
                 _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, cast)}
             }
@@ -241,7 +251,7 @@ impl <'a, 'ast> Typecheck<'ast> {
     pub fn print_lr(&self) -> () {
         // TODO: Make this print and annotate the AST.
         for (handle, lr) in &self.lr {
-            let node = self.get_node(&handle);
+            let node = self.get(handle);
             match node {
                 _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, lr)}
             }
@@ -260,21 +270,21 @@ impl <'a, 'ast> Typecheck<'ast> {
         )
     }
 
-    fn try_array_decay(& mut self, node_h: &ASTNodeHandle) -> LR {
+    fn try_array_decay(& mut self, node_h: ASTNodeHandle) -> LR {
         // Assert that this is a symbol ref.
-        let Some(symbol) = self.symbol_table.entries.get(*node_h) else {
+        let Some(DeclRef::LocalVar(symbol)) = self.uses.get(node_h) else {
             return LR::LValue;
         };
 
-        if self.context.resolve_type(symbol.type_info).is_array() {
-            self.casts.insert(*node_h, TypeCast::ArrayToPointerDecay);
+        if self.context.resolve_type(&symbol.type_info).is_array() {
+            self.casts.insert(node_h, TypeCast::ArrayToPointerDecay);
 
-            let mut r#type = self.context.resolve_type(symbol.type_info).clone();
+            let mut r#type = self.context.resolve_type(&symbol.type_info).clone();
             let first = r#type.declarator.first_mut().unwrap();
             *first = DeclaratorPart::PointerDecl(None);
 
             let r#type = self.context.get_type(&r#type);
-            self.types.insert(*node_h, r#type);
+            self.types.insert(node_h, r#type);
             LR::RValue
 
         }
@@ -305,23 +315,23 @@ impl <'a> TypedASTPrint<'a> {
 
 impl <'a> Vistior<'a> for TypedASTPrint<'a> {
 
-    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
+    fn preorder(&mut self, node_h: ASTNodeHandle) -> () {
         self.depth += 1;
         // TODO: Condition on debug mdoe vs pretty mode
-        let node = self.get_node(node_h);
+        let node = self.get(node_h);
         let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
 
-        let type_string = match self.types.get(*node_h) {
-            Some(t) => format!("{}", TypePrintable{data: self.context.resolve_type(*t), context: self.context}),
+        let type_string = match self.types.get(node_h) {
+            Some(t) => format!("{}", TypePrintable{data: self.context.resolve_type(t), context: self.context}),
             None => "".to_string(),
         };
 
-        let lr = match self.lr.get(*node_h) {
+        let lr = match self.lr.get(node_h) {
             Some(lr) => format!("{}", lr),
             None => "".to_string(),
         };
 
-        let cast = match self.casts.get(*node_h) {
+        let cast = match self.casts.get(node_h) {
             Some(cast) => format!("{}", cast),
             None => "".to_string(),
         };
@@ -336,12 +346,12 @@ impl <'a> Vistior<'a> for TypedASTPrint<'a> {
         
     }
 
-    fn postorder(&mut self, _node_h: &ASTNodeHandle) -> () {
+    fn postorder(&mut self, _node_h: ASTNodeHandle) -> () {
         self.depth -= 1;
     }
 
-    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
-        self.ast.nodes.get(*node_h).unwrap()
+    fn get(&self, node_h: ASTNodeHandle) -> &ASTNode {
+        self.ast.nodes.get(node_h).unwrap()
     }
     
 }

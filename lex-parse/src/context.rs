@@ -1,10 +1,10 @@
-use std::{collections::HashMap, fs::File, cell::RefCell};
+use std::{collections::HashMap, fs::File, cell::RefCell, ops::Deref};
 
 use slotmap::SecondaryMap;
 // Do a custom string interner eventually.
 use string_interner::{backend::StringBackend, symbol::SymbolU16, StringInterner};
 
-use crate::{types::{Type}, error::ErrorHandler, ast::ASTNodeHandle, token::Token};
+use crate::{types::{Type}, error::{ErrorHandler, AnalysisError}, ast::ASTNodeHandle, token::Token};
 
 pub type InternedString = SymbolU16;
 
@@ -29,7 +29,7 @@ impl <'ctx> Context <'ctx>{
         self.strings.borrow_mut().get_or_intern(string)
     }
 
-    pub fn resolve_type(&self, r#type: InternedType) -> Type {
+    pub fn resolve_type(&self, r#type: &InternedType) -> Type {
         self.types.borrow().resolve(r#type)
     }
 
@@ -48,12 +48,19 @@ impl <'ctx> Context <'ctx>{
     pub fn get_token(&self, node: ASTNodeHandle) -> Option<Token> {
         self.tokens.borrow().get(node).cloned()
     }
-
-
 }
-#[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
 pub struct InternedType {
     value: usize,
+}
+
+impl Deref for InternedType {
+    fn deref(&self) -> &InternedType {
+        self
+    }
+
+    type Target = InternedType;
 }
 
 #[derive(Debug)]
@@ -81,7 +88,7 @@ impl TypeInterner {
         }
     }
 
-    pub fn resolve(&self, idx: InternedType) -> Type {
+    pub fn resolve(&self, idx: &InternedType) -> Type {
         self.buff[idx.value as usize].to_owned()
     }
    

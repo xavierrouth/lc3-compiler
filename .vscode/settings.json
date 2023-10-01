@@ -3,6 +3,7 @@
         "./lex-parse/Cargo.toml",
         "./codegen/Cargo.toml",
         "./analysis/Cargo.toml",
+        "./intermediate/Cargo.toml",
         "./intermediate/Cargo.toml"
     ],
     "terminal.integrated.env.linux": {

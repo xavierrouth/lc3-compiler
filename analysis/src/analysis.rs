@@ -1,5 +1,6 @@
 use core::fmt;
 use std::cell::RefCell;
+use std::ops::Deref;
 use std::rc::Rc;
 
 use slotmap::{SparseSecondaryMap, SecondaryMap};
@@ -9,58 +10,63 @@ use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{InternedString, InternedType, Context, self};
 use lex_parse::types::{Type, DeclaratorPart, CType};
 
-use crate::symbol_table::{self, SymbolTable, Scope, Declaration, DeclarationType, DeclarationPrintable, Record};
+use crate::symbol_table::{SymbolTable, Scope, LocalVarDecl, RecordDecl, FunctionDecl, FieldDecl, DeclRef, ScopeHandle, ScopeKind, self};
+
+
+// TODO: 
+/*
+pub struct AnalysisResult {
+    symbol_table: SymbolTable,
+}  */
 
 /** Analysis pass on AST, borrows AST while it is alive. 
  *  Populates a symbol table, and maps symbol references to the corresponding declarations in the symbol table.
  *  
 */
-pub struct Analyzer<'a> {
+pub struct AnalysisPass<'ctx> {
     pub symbol_table: SymbolTable, // 
+
+    curr_scope: ScopeHandle,
+
+    // This is kinda disgusting, but neceesary
+    scopes: SparseSecondaryMap<ASTNodeHandle, ScopeHandle>,
+
     halt: bool,
 
-    ast: &'a AST,
-    error_handler: &'a ErrorHandler<'a>,
-    context: &'a Context<'a>, //TODO: Merge error handler and context.
+    ast: &'ctx AST,
+    error_handler: &'ctx ErrorHandler<'ctx>,
+    context: &'ctx Context<'ctx>, //TODO: Merge error handler and context.
 }
 
-impl <'a> Analyzer<'a> {
-    pub fn new(ast: &'a AST, context: &'a Context<'a>, error_handler: &'a ErrorHandler<'a>) -> Analyzer<'a> {
-        Analyzer { symbol_table: SymbolTable::new(), ast, context, error_handler, halt: false}
+impl <'ctx> AnalysisPass<'ctx> {
+
+    pub fn new(ast: &'ctx AST, context: &'ctx Context<'ctx>, error_handler: &'ctx ErrorHandler<'ctx>) -> AnalysisPass<'ctx> {
+        let mut symbol_table = SymbolTable::new();
+        let file_scope = Scope {kind: ScopeKind::File, declarations: Vec::new()};
+        let file_scope = symbol_table.scope_arena.insert(file_scope);
+        AnalysisPass { symbol_table, scopes: SparseSecondaryMap::new(), ast, context, error_handler, 
+            curr_scope: file_scope, halt: false}
     }
 
+    /* 
     pub fn print_symbol_table(&self) -> () {
         for (handle, declaration) in &self.symbol_table.entries {
-            let node = self.get_node(&handle);
+            let node = self.get(handle);
             match node {
                 ASTNode::SymbolRef{.. } => (),    
-                _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, DeclarationPrintable{declaration: declaration.clone(), context: self.context})}
+                _ => {println!("{} {}", ASTNodePrintable{node: node.clone(), context: self.context}, LocalVarDeclPrintable{declaration: declaration.clone(), context: self.context})}
             }
         }
         println!("Records:");
         for record in &self.symbol_table.records {
-            let Record { identifier, size, fields } = record;
+            let RecordDecl { identifier, size, fields } = record;
             let identifier = self.context.resolve_string(*identifier);
             println!("<struct {identifier}, size: {size}>");
             for field in fields {
-                println!("{}", DeclarationPrintable{declaration: field.clone(), context: self.context});
+                println!("{}", LocalVarDeclPrintable{declaration: field.clone(), context: self.context});
             }
         }
-    }
-
-    fn enter_scope(&mut self, next_param_slot: i32, next_variable_slot: i32) -> () {
-        self.symbol_table.stack.push(Scope::new(next_param_slot, next_variable_slot));
-    }
-
-    fn curr_scope(&mut self) -> &mut Scope {
-        self.symbol_table.stack.last_mut().unwrap()
-    }
-
-    fn exit_scope(&mut self) -> () {
-        self.symbol_table.stack.pop();
-        ()
-    }
-
+    }*/
     
     fn report_error(&mut self, error: AnalysisError) -> () {
         self.halt = true;
@@ -72,62 +78,64 @@ impl <'a> Analyzer<'a> {
 
 }
 
-impl <'a> Vistior<'a> for Analyzer<'a> {
+
+impl <'ctx> Vistior<'ctx> for AnalysisPass<'ctx> {
     // TODO: Should this really be in preorder??
-    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
-        let node = self.get_node(node_h).clone();
+    fn preorder(& mut self, node_h: ASTNodeHandle) -> () {
+        let node = self.get(node_h).clone();
         match node {
             ASTNode::CompoundStmt { statements: _, new_scope } => {
                 if new_scope == true {
                     // Copy over offsets, because we stil are on the same stack frame.
-                    let next_param_slot = self.curr_scope().next_param_slot;
-                    let next_variable_slot = self.curr_scope().next_variable_slot;
                     // TODO: Distinguish between scopes / stack frames?
-                    self.enter_scope(next_param_slot, next_variable_slot);
+                    let block_scope = Scope {declarations: Vec::new(), kind: ScopeKind::Block(self.curr_scope.clone())};
+                    self.curr_scope = self.symbol_table.scope_arena.insert(block_scope)
                 }
             },
             ASTNode::RecordDecl { identifier, record_type, fields } => {
                 let mut record_fields = Vec::new();
-                let mut offset: usize = 0;
 
+                let mut record_size: usize = 0;
+
+                // Start generating a record Decl.
                 for field in fields {
-                    let ASTNode::FieldDecl{identifier, type_info} = self.get_node(&field) else {
+                    let ASTNode::FieldDecl{identifier, type_info} = self.get(field) else {
                         return;
                     };
-                    let size = self.context.resolve_type(*type_info).calculate_size(); 
-                    let decl = Declaration {
+                    // There can be an error here, infinite size struct.
+                    let size = self.context.resolve_type(type_info).calculate_size();
+                    
+                    let decl = FieldDecl {
                         identifier: *identifier,
-                        size: size,
-                        offset: offset.try_into().unwrap(),
+                        size,
                         type_info: *type_info,
-                        is_global: false,
-                        kind: DeclarationType::Field,
                     };
-                    offset += size;
+                    record_size += size;
                     record_fields.push(decl);
                 }
                 
                 self.symbol_table.records.push(
-                Record {
+                RecordDecl {
                     identifier,
-                    size: offset,
                     fields: record_fields,
+                    complete: true,
+                    size: record_size,
                 });
 
-                // Start generating a record Decl.
+                
             },
             ASTNode::VariableDecl { identifier, initializer: _, type_info } => {
                 // Make a new entry
                 // We should really store both Records and Types in the type contaxt.
                 let size = {
-                    let type_info = self.context.resolve_type(type_info);
+                    let type_info = self.context.resolve_type(&type_info);
                     if type_info.is_record() {
                         let Some(CType::Struct(type_name)) = type_info.specifier.ctype else {
-                            self.report_error(AnalysisError::General(*node_h));
+                            self.report_error(AnalysisError::General(node_h));
                             return;
                         };
                         let Some(record) = self.symbol_table.search_record(&type_name) else {
-                            self.report_error(AnalysisError::General(*node_h));
+                            self.report_error(AnalysisError::General(node_h));
                             return;
                         };
                         record.size
@@ -138,24 +146,21 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     }
                 };
                 // Derive size from TypeInfo
-                let scope = self.curr_scope();
 
-                scope.next_variable_slot += size as i32;
 
-                let entry = Declaration {
+                let entry = LocalVarDecl {
+                    scope: self.curr_scope, // Need this for hashing!
                     identifier,
                     size,
-                    offset: (scope.next_variable_slot - 1) * -1,
-                    kind: DeclarationType::Var,
                     type_info,
-                    is_global: scope.is_global,
+                    is_parameter: false,
                 };
                 
 
                 // Need some way to error out here:
                 // How am i supposed to extract error from eresuklt?
                               
-                match self.symbol_table.add(*node_h, entry) {
+                match self.symbol_table.add_local_decl(self.curr_scope.clone(), node_h, entry) {
                     Err(error) => {self.report_error(error)}
                     Ok(()) => ()
                 }  
@@ -164,14 +169,14 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
             ASTNode::ParameterDecl { identifier, type_info } => {
                 // Make a new entry
                 let size = {
-                    let type_info = self.context.resolve_type(type_info);
+                    let type_info = self.context.resolve_type(&type_info);
                     if type_info.is_record() {
                         let Some(CType::Struct(type_name)) = type_info.specifier.ctype else {
-                            self.report_error(AnalysisError::General(*node_h));
+                            self.report_error(AnalysisError::General(node_h));
                             return;
                         };
                         let Some(record) = self.symbol_table.search_record(&type_name) else {
-                            self.report_error(AnalysisError::General(*node_h));
+                            self.report_error(AnalysisError::General(node_h));
                             return;
                         };
                         record.size
@@ -182,110 +187,130 @@ impl <'a> Vistior<'a> for Analyzer<'a> {
                     }
                 };
                 
-                let scope = self.curr_scope();
+                
 
                 // ASsert that size = 1
-                let entry = Declaration {
-                    identifier: identifier,
-                    size: 1,
-                    offset: scope.next_param_slot + 4,
-                    kind: DeclarationType::Param,
-                    type_info: type_info,
-                    is_global: false,
+                let entry = LocalVarDecl {
+                    scope: self.curr_scope, // Need this for hashing!
+                    identifier,
+                    size,
+                    is_parameter: true,
+                    type_info,
                 };
-                scope.next_param_slot += 1;
+
+                let scope = self.curr_scope.clone();
 
                 // Need some way to error out here:
-                match self.symbol_table.add(*node_h, entry) {
+                match self.symbol_table.add_local_decl(scope, node_h, entry) {
                     Err(error) => {self.report_error(error)}
                     Ok(()) => ()
                 }
             },
             ASTNode::FunctionDecl { body: _, parameters: _, identifier, return_type } => {
-                let entry = Declaration {
+                let entry = FunctionDecl {
                     identifier: identifier,
-                    size: 1,
-                    offset: 0,
-                    kind: DeclarationType::Function,
                     type_info: r#return_type,
-                    is_global: true,
                 };
 
                 // Need some way to error out here:
-                match self.symbol_table.add(*node_h, entry) {
+                match self.symbol_table.add_function_decl(node_h, entry) {
                     Err(error) => {self.report_error(error)}
                     Ok(()) => ()
                 };
 
                 // TODO: Distinguish between scopes / stack frames?
-                self.enter_scope(0, 0);
+                
+                let function_scope = Scope {declarations: Vec::new(), kind: ScopeKind::Function(self.curr_scope.clone())};
+                self.curr_scope = self.symbol_table.scope_arena.insert(function_scope)
             }
             ASTNode::ForStmt { initializer: _, condition: _, update: _, body: _ } => {
-                let next_param_slot = self.curr_scope().next_param_slot;
-                let next_variable_slot = self.curr_scope().next_variable_slot;
                 // TODO: Distinguish between scopes / stack frames?
-                self.enter_scope(next_param_slot, next_variable_slot);
+                let block_scope = Scope {declarations: Vec::new(), kind: ScopeKind::Block(self.curr_scope.clone())};
+                self.curr_scope = self.symbol_table.scope_arena.insert(block_scope)
             }
             // Not a delcaration:
             ASTNode::SymbolRef { identifier } => {
                 // If this node already has an entry, than just ignore it:,
                 // This will happen if FunctionCall sets it, or a binop that is a struct access.
-                if self.symbol_table.entries.get(*node_h).is_some() {
+                /*
+                if self.uses.get(node_h).is_some() {
                     return;
                 }
 
                 // Make sure that it exists, and then map this node to the existing entry.
-                let entry = self.symbol_table.search_up(&identifier, &DeclarationType::Var);
-                if entry.is_none() {
-                    let error = AnalysisError::UnknownSymbol(identifier, *node_h);
-                    self.report_error(error);
-                }
-                else {
-                    self.symbol_table.entries.insert(*node_h, entry.unwrap()); // Map node to the entry information that it needs
-                }
-                
+                match self.symbol_table.search_local_up(&identifier) {
+                    Some(entry) => {
+                        self.uses.insert(node_h, DeclRef::LocalVar(entry.clone())); // Map node to the entry information that it needs
+                    },
+                    None => {
+                        let error = AnalysisError::UnknownSymbol(identifier, node_h);
+                        self.report_error(error);
+                    }
+                }  */
             }
             ASTNode::FunctionCall { symbol_ref, arguments } => {
                 // Need to do make sure this is a valid function, .i.e search up scope for it's symbol.
                 // Make sure that it exists, and then map this node to the existing entry.
-                let child = self.get_node(&symbol_ref).clone();
+                /* 
+                let child = self.get(symbol_ref).clone();
 
                 let (entry, identifier) = match child {
                     ASTNode::SymbolRef { identifier } => {
-                        (self.symbol_table.search_up(&identifier, &DeclarationType::Function), identifier)
+                        (self.symbol_table.search_function(&identifier), identifier)
                     }
                     _ => {
                         return;
                     }
                 };
 
-                if entry.is_none() {
-                    let error = AnalysisError::UnknownSymbol(identifier, *node_h);
-                    self.report_error(error);
-                }
-                else {
-                    self.symbol_table.entries.insert(symbol_ref, entry.unwrap());
-                }
+                match entry {
+                    Some(entry) => {
+                        self.uses.insert(symbol_ref, DeclRef::Function(entry.clone()));
+                    },
+                    None => {
+                        let error = AnalysisError::UnknownSymbol(identifier, node_h);
+                        self.report_error(error);
+                    }
+                } */
             }
             _ => ()
         }
     }
 
-    fn postorder(&mut self, node_h: &ASTNodeHandle) -> () {
-        let node = self.get_node(node_h);
+    fn postorder(&mut self, node_h: ASTNodeHandle) -> () {
+        let node = self.get(node_h);
         match node {
             ASTNode::CompoundStmt { statements: _, new_scope } => {
-                if *new_scope {self.exit_scope();}
+                if *new_scope {
+                     match self.symbol_table.resolve_scope(self.curr_scope) {
+                        Scope{kind: ScopeKind::Block(parent), ..} => {
+                            self.curr_scope = parent.clone()
+                        }
+                        Scope{kind: ScopeKind::Function(parent), ..} => {
+                            self.curr_scope = parent.clone()
+                        }
+                        _ => panic!("Uh oh!")
+                    };
+                }
+                
             }
             ASTNode::FunctionDecl { body: _, parameters: _, identifier: _, return_type: _ } => {
-                self.exit_scope();
+                match self.symbol_table.resolve_scope(self.curr_scope) {
+                    Scope{kind: ScopeKind::Block(parent), ..} => {
+                        self.curr_scope = parent.clone();
+                    }
+                    Scope{kind: ScopeKind::Function(parent), ..} => {
+                        self.curr_scope = parent.clone();
+                    }
+                    _ => panic!("Uh oh!")
+                };
             }
             _ => ()
         }
     }
 
-    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
-        self.ast.nodes.get(*node_h).unwrap()
+    fn get(&self, node_h: ASTNodeHandle) -> &ASTNode {
+        self.ast.nodes.get(node_h).unwrap()
     }
 
     fn halt(&self) -> bool {

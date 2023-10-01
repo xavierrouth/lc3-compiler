@@ -10,7 +10,7 @@ use crate::token::{Token};
 
 // Need to maintain some maps, first is debug info, which maps ASTNodes to tokens.
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinaryOpType {
     Add,
     Sub,
@@ -69,13 +69,7 @@ impl Display for RecordType {
 
 slotmap::new_key_type! { pub struct ASTNodeHandle; }
 
-impl Deref for ASTNodeHandle {
-    type Target = ASTNodeHandle;
 
-    fn deref(&self) -> &Self::Target {
-        self
-    }
-}
 
 // SlotMap is just an arena allocator
 pub struct AST {
@@ -88,8 +82,19 @@ impl <'a> AST {
         AST { nodes: SlotMap::with_key(), root: None}
     }
 
-    pub fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
-        self.nodes.get(*node_h).unwrap()
+    pub fn get(&self, node_h: ASTNodeHandle) -> &ASTNode {
+        self.nodes.get(node_h).unwrap()
+    }
+
+    pub fn functions(&self) -> Vec<ASTNodeHandle> {
+        let mut vec = Vec::new();
+        for (handle, data) in self.nodes.iter() {
+            match data {
+                ASTNode::FunctionDecl { .. } => vec.push(handle),
+                _ => continue
+            }
+        }
+        vec
     }
 }
 
@@ -180,6 +185,7 @@ pub enum ASTNode {
         if_branch: ASTNodeHandle,
         else_branch: Option<ASTNodeHandle>,
     },
+    BreakStmt,
     DeclStmt {
         declarations: Vec<ASTNodeHandle>,
     },
@@ -214,7 +220,7 @@ impl Display for ASTNodePrintable<'_> {
                 write!(f, "<ParameterDecl, {}>", self.context.resolve_string(*identifier))
             }
             ASTNode::VariableDecl { identifier, initializer: _, type_info: type_info } => {
-                write!(f, "<VariableDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(*type_info), context: self.context}
+                write!(f, "<VariableDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(type_info), context: self.context}
                 )
             },
             ASTNode::IntLiteral { value } => {
@@ -258,97 +264,101 @@ impl Display for ASTNodePrintable<'_> {
                 write!(f, "<RecordDecl, {record_type}, {}>", self.context.resolve_string(*identifier))
             }
             ASTNode::FieldDecl { identifier, type_info } => {
-                write!(f, "<FieldDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(*type_info), context: self.context})
+                write!(f, "<FieldDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(type_info), context: self.context})
             }
-
+            ASTNode::BreakStmt => {
+                write!(f, "<BreakStmt>")
+            }
         }
     }
 }
 
 pub trait Vistior<'a> {
-    fn traverse(&mut self, node_h: &ASTNodeHandle) -> () {
+
+    fn traverse(& mut self, node_h: ASTNodeHandle) -> () {
         if self.halt() {
             return;
         }
 
-        let node: ASTNode = self.get_node(node_h).clone();
+        let node: ASTNode = self.get(node_h).clone();
 
         self.preorder(node_h);
 
         match node {
             ASTNode::BinaryOp { op: _, right, left } => {
-                self.traverse(&left);
-                self.traverse(&right);
+                self.traverse(left);
+                self.traverse(left);
+                self.traverse(right);
             }
             ASTNode::UnaryOp { op: _, child, order: _ } => {
-                self.traverse(&child);
+                self.traverse(child);
             }
             ASTNode::FunctionCall { symbol_ref, arguments } => {
-                self.traverse(&symbol_ref);
-                for arg in arguments.iter() {
+                self.traverse(symbol_ref);
+                for &arg in arguments.iter() {
                     self.traverse(arg);
                 }
             }
             ASTNode::FunctionDecl { body, parameters, identifier: _, return_type: _ } => {
-                for param in parameters.iter() {
+                for &param in parameters.iter() {
                     self.traverse(param);
                 }
-                self.traverse(&body);
+                self.traverse(body);
             }
             ASTNode::VariableDecl { identifier: _, initializer, type_info: _ } => {
-                if initializer.is_some() {
-                    self.traverse(initializer.as_ref().unwrap()); // Why doesn't this explicitly deref??
-                }
+                if let Some(intiailizer) = initializer {
+                    self.traverse(intiailizer) // Why doesn't this explicitly deref??
+                };
             }
             ASTNode::ReturnStmt { expression } => {
                 match expression {
-                    Some(expression) => self.traverse(&expression),
+                    Some(expression) => self.traverse(expression),
                     None => (),
                 }
             }
             ASTNode::CompoundStmt { statements, new_scope: _ } => {
-                for stmt in statements.iter() {
+                for &stmt in statements.iter() {
                     self.traverse(stmt);
                 }
             }
             ASTNode::IfStmt { condition, if_branch, else_branch } => {
-                self.traverse(&condition);
-                self.traverse(&if_branch);
+                self.traverse(condition);
+                self.traverse(if_branch);
                 if let Some(else_branch) = else_branch {
-                    self.traverse(&else_branch);
+                    self.traverse(else_branch);
                 }
             }
             ASTNode::ForStmt { initializer, condition, update, body } => {
-                self.traverse(&initializer);
-                self.traverse(&condition);
-                self.traverse(&update);
-                self.traverse(&body);
+                self.traverse(initializer);
+                self.traverse(condition);
+                self.traverse(update);
+                self.traverse(body);
             }
             ASTNode::WhileStmt { condition, body } => {
-                self.traverse(&condition);
-                self.traverse(&body);
+                self.traverse(condition);
+                self.traverse(body);
             }
 
             ASTNode::Program { declarations } => {
-                for decl in declarations.iter() {
+                for &decl in declarations.iter() {
                     self.traverse(decl);
                 }
             },
             ASTNode::Ternary { first, second, third } => {
-                self.traverse(&first);
-                self.traverse(&second);
-                self.traverse(&third);
+                self.traverse(first);
+                self.traverse(second);
+                self.traverse(third);
             }
             ASTNode::ExpressionStmt { expression } => {
-                self.traverse(&expression);
+                self.traverse(expression);
             },
             ASTNode::DeclStmt { declarations } => {
-                for decl in declarations.iter() {
+                for &decl in declarations.iter() {
                     self.traverse(decl);
                 }
             },
             ASTNode::RecordDecl { identifier, record_type, fields } => {
-                for field in fields.iter() {
+                for &field in fields.iter() {
                     self.traverse(field);
                 }
             }
@@ -359,6 +369,7 @@ pub trait Vistior<'a> {
             ASTNode::SymbolRef { identifier: _} => {}
             ASTNode::FieldDecl { identifier: _, type_info: _ } => {}
             ASTNode::FieldRef { identifier: _} => {}
+            ASTNode::BreakStmt => {}
             
         }
 
@@ -366,12 +377,12 @@ pub trait Vistior<'a> {
     }
 
     // Implementations must overloadd
-    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode;
+    fn get(&self, node_h: ASTNodeHandle) -> &ASTNode;
 
     // Optional overload
-    fn preorder(&mut self, _node_h: &ASTNodeHandle) -> () {}
+    fn preorder(&mut self, _node_h: ASTNodeHandle) -> () {}
 
-    fn postorder(&mut self, _node_h: &ASTNodeHandle) -> () {}
+    fn postorder(&mut self, _node_h: ASTNodeHandle) -> () {}
 
     fn halt(& self) -> bool {false}
 
@@ -392,14 +403,14 @@ impl<'a> ASTCheck<'a>{
 
 impl <'a> Vistior<'a> for ASTCheck<'a> {
 
-    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
-        let node = self.get_node(node_h);
+    fn preorder(&mut self, node_h: ASTNodeHandle) -> () {
+        let node = self.get(node_h);
         self.results.push(std::mem::discriminant(&node));
     }
 
     // Why is this clone?
-    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
-        self.ast.nodes.get(*node_h).unwrap()
+    fn get(&self, node_h: ASTNodeHandle) -> &ASTNode {
+        self.ast.nodes.get(node_h).unwrap()
     }
 }
 
@@ -420,10 +431,10 @@ impl <'a> ASTPrint<'a> {
 
 impl <'a> Vistior<'a> for ASTPrint<'a> {
 
-    fn preorder(&mut self, node_h: &ASTNodeHandle) -> () {
+    fn preorder(&mut self, node_h: ASTNodeHandle) -> () {
         self.depth += 1;
         // TODO: Condition on debug mdoe vs pretty mode
-        let node = self.get_node(node_h);
+        let node = self.get(node_h);
         let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
         if self.debug_mode {
             println!("{whitespace_string}{:?}", node)
@@ -435,12 +446,12 @@ impl <'a> Vistior<'a> for ASTPrint<'a> {
         
     }
 
-    fn postorder(&mut self, _node_h: &ASTNodeHandle) -> () {
+    fn postorder(&mut self, _node_h: ASTNodeHandle) -> () {
         self.depth -= 1;
     }
 
-    fn get_node(&self, node_h: &ASTNodeHandle) -> &ASTNode {
-        self.ast.nodes.get(*node_h).unwrap()
+    fn get(&self, node_h: ASTNodeHandle) -> &ASTNode {
+        self.ast.nodes.get(node_h).unwrap()
     }
     
 }
