@@ -12,5 +12,5 @@ clap = { version = "4.3.23", features = ["derive"] }
 string-interner = "0.14"
 # codegen = { path = "../codegen" }
 lex-parse = { path = "../lex-parse" }
-intermediate = {path = "../intermediate" }
+# intermediate = {path = "../intermediate" }
 analysis = { path = "../analysis" }

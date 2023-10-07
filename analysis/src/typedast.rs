@@ -45,10 +45,9 @@ type VarDeclRef = VarDecl;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypedASTNode {
     // ==== Declarations: ====
-    Empty,
     Program { 
         functions: Vec<TypedASTNodeHandle>,
-        globals: Vec<VarDeclRef>, // Data section.
+        globals: Vec<VarDeclRef>,  // TODO: Keep these as VariableDecl typedASTNodes, instead of moving them to the program delaration during type checking.
     },
     FunctionDecl {
         body: TypedASTNodeHandle,
@@ -57,7 +56,12 @@ pub enum TypedASTNode {
 
         // Local variables / Parameters.
         parameters: Vec<VarDeclRef>,
-        locals: Vec<VarDeclRef>,
+        // locals: Vec<VarDeclRef>, // TODO: Keep these as VariableDecl typedASTNodes, instead of moving them to the function delaration during type checking.
+    },
+    VariableDecl {
+        decl: VarDeclRef,
+        initializer: Option<TypedASTNodeHandle>,
+        type_info: InternedType,
     },
     // Note, we have removed the Record and Field declarations, as they don't get lowered to anything. 
     // ==== Expressions: ====
@@ -151,7 +155,220 @@ impl Display for TypedASTNodePrintable<'_> {
             TypedASTNode::BinaryOp { op, right: _, left: _, ty } => {
                 write!(f, "<BinaryOp, op: {:?}>", op)
             }
-            _ => todo!()
+            TypedASTNode::CompoundStmt { statements: _, } => {
+                write!(f, "<CompoundStmt>")
+            }
+            TypedASTNode::Program { functions, globals} => {
+                write!(f, "<Program>");
+                for global in globals {
+                    writeln!(f, "<var decl: {:?}>", global);
+                }
+                write!(f, "")
+            },
+            TypedASTNode::VariableDecl { decl, initializer, type_info } => {
+                write!(f, "<VariableDecl, {}, {}>", self.context.resolve_string(decl.identifier), TypePrintable{data: self.context.resolve_type(type_info), context: self.context})
+            }
+            TypedASTNode::FunctionDecl { body: _, parameters, identifier, return_type: _ } => {
+                write!(f, "<FunctionDecl, {}>", self.context.resolve_string(*identifier))
+            },
+            TypedASTNode::IntLiteral { value } => {
+                write!(f, "<IntLiteral, {}>", value)
+            },
+            TypedASTNode::FunctionCall { symbol_ref: _, arguments: _, ty } => {
+                write!(f, "<FunctionCall>")
+            },
+            TypedASTNode::SymbolRef { identifier, decl, ty } => {
+                write!(f, "<SymbolRef, {}>", self.context.resolve_string(*identifier))
+            },
+            TypedASTNode::FieldRef { identifier, ty } => {
+                write!(f, "<FieldRef, {}>", self.context.resolve_string(*identifier))
+            },
+            TypedASTNode::UnaryOp { op, child: _, order, ty } => {
+                write!(f, "<UnaryOp, op: {:?}, preorder: {:?}>", op, order)
+            },
+            TypedASTNode::Ternary { first: _, second: _, third: _, ty } => {
+                write!(f, "<TernaryOp>")
+            },
+            TypedASTNode::ExpressionStmt { expression: _ } => {
+                write!(f, "<ExpressionStmt>")
+            },
+            TypedASTNode::ReturnStmt { expression: _ } => {
+                write!(f, "<ReturnStmt>")
+            },
+            TypedASTNode::ForStmt { initializer: _, condition: _, update: _, body: _ } => {
+                write!(f, "<ForStmt>")
+            },
+            TypedASTNode::WhileStmt { condition: _, body: _ } => {
+                write!(f, "<WhileStmt>")
+            },
+            TypedASTNode::IfStmt { condition: _, if_branch: _, else_branch: _ } =>  {
+                write!(f, "<IfStmt>")
+            },
+            TypedASTNode::DeclStmt { declarations: _ } =>  {
+                write!(f, "<DeclStmt>")
+            },
+            TypedASTNode::InlineAsm { assembly: _ } => todo!(),
+            TypedASTNode::BreakStmt => {
+                write!(f, "<BreakStmt>")
+            },
+            TypedASTNode::LvalueToRvalue { child, ty } => {
+                write!(f, "<LvalueToRvalue>")
+            }
+            TypedASTNode::ArrayToPointerDecay { child, ty } => todo!(),
         }
     }
+}
+
+pub trait TypedVistior<'a> {
+    fn traverse(& mut self, node_h: TypedASTNodeHandle) -> () {
+        if self.halt() {
+            return;
+        }
+
+        let node: TypedASTNode = self.get(node_h).clone();
+
+        self.preorder(node_h);
+
+        match node {
+            TypedASTNode::BinaryOp { op: _, right, left, ty } => {
+                self.traverse(left);
+                self.traverse(left);
+                self.traverse(right);
+            }
+            TypedASTNode::UnaryOp { op: _, child, order: _, ty } => {
+                self.traverse(child);
+            }
+            TypedASTNode::FunctionCall { symbol_ref, arguments, ty } => {
+                self.traverse(symbol_ref);
+                for &arg in arguments.iter() {
+                    self.traverse(arg);
+                }
+            }
+            TypedASTNode::FunctionDecl { body, parameters, identifier: _, return_type: _, } => {
+                self.traverse(body);
+            }
+            /*
+            TypedASTNode::VariableDecl { identifier: _, initializer, type_info: _ } => {
+                if let Some(intiailizer) = initializer {
+                    self.traverse(intiailizer) // Why doesn't this explicitly deref??
+                };
+            }  */
+            TypedASTNode::ReturnStmt { expression } => {
+                match expression {
+                    Some(expression) => self.traverse(expression),
+                    None => (),
+                }
+            }
+            TypedASTNode::CompoundStmt { statements } => {
+                for &stmt in statements.iter() {
+                    self.traverse(stmt);
+                }
+            }
+            TypedASTNode::IfStmt { condition, if_branch, else_branch } => {
+                self.traverse(condition);
+                self.traverse(if_branch);
+                if let Some(else_branch) = else_branch {
+                    self.traverse(else_branch);
+                }
+            }
+            TypedASTNode::ForStmt { initializer, condition, update, body } => {
+                self.traverse(initializer);
+                self.traverse(condition);
+                self.traverse(update);
+                self.traverse(body);
+            }
+            TypedASTNode::WhileStmt { condition, body } => {
+                self.traverse(condition);
+                self.traverse(body);
+            }
+            TypedASTNode::Program { functions, globals } => {
+                for &func in functions.iter() {
+                    self.traverse(func);
+                }
+            },
+            TypedASTNode::Ternary { first, second, third, ty } => {
+                self.traverse(first);
+                self.traverse(second);
+                self.traverse(third);
+            }
+            TypedASTNode::ExpressionStmt { expression } => {
+                self.traverse(expression);
+            },
+            TypedASTNode::DeclStmt { declarations } => {
+                for &decl in declarations.iter() {
+                    self.traverse(decl);
+                }
+            },
+            TypedASTNode::LvalueToRvalue { child, ty } => {
+                self.traverse(child);
+            }
+            TypedASTNode::ArrayToPointerDecay { child, ty } => {
+                self.traverse(child);
+            },
+            TypedASTNode::VariableDecl { decl, initializer, type_info } => {
+                if let Some(intiailizer) = initializer {
+                    self.traverse(intiailizer)
+                };
+            },
+            // Terminal Nodes
+            TypedASTNode::InlineAsm { assembly: _ } => {}
+            TypedASTNode::IntLiteral { value: _  } => {}
+            TypedASTNode::SymbolRef { identifier: _, decl, ty } => {}
+            TypedASTNode::FieldRef { identifier: _, ty } => {}
+            TypedASTNode::BreakStmt => {}
+            
+        }
+
+        self.postorder(node_h);
+    }
+
+    // Implementations must overloadd
+    fn get(&self, node_h: TypedASTNodeHandle) -> &TypedASTNode;
+
+    // Optional overload
+    fn preorder(&mut self, _node_h: TypedASTNodeHandle) -> () {}
+
+    fn postorder(&mut self, _node_h: TypedASTNodeHandle) -> () {}
+
+    fn halt(& self) -> bool {false}
+
+}
+
+pub struct TypedASTPrint<'a> {
+    pub debug_mode: bool,
+    pub depth: usize,
+    ast: &'a TypedAST,
+    context: &'a Context<'a>,
+}
+
+impl <'a> TypedASTPrint<'a> {
+    pub fn new(debug_mode: bool, ast: &'a TypedAST, context: &'a Context<'a>) -> TypedASTPrint<'a> {
+        TypedASTPrint { context, debug_mode , depth: 0, ast}
+    }
+}
+
+impl <'a> TypedVistior<'a> for TypedASTPrint<'a> {
+
+    fn preorder(&mut self, node_h: TypedASTNodeHandle) -> () {
+        self.depth += 1;
+        // TODO: Condition on debug mdoe vs pretty mode
+        let node = self.get(node_h);
+        let whitespace_string: String = std::iter::repeat(' ').take((self.depth - 1) * 4).collect();
+        if self.debug_mode {
+            println!("{whitespace_string}{:?}", node)
+        }
+        else {
+            let printable = TypedASTNodePrintable{ node: node.clone(), context: self.context};
+            println!("{whitespace_string}{:}", printable);
+        }
+    }
+
+    fn postorder(&mut self, _node_h: TypedASTNodeHandle) -> () {
+        self.depth -= 1;
+    }
+
+    fn get(&self, node_h: TypedASTNodeHandle) -> &TypedASTNode {
+        self.ast.nodes.get(node_h).unwrap()
+    }
+    
 }

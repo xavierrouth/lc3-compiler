@@ -84,19 +84,11 @@ impl <'a> HIRGen<'a> {
                         let base = self.emit_expression(cfg, basic_block_h, *left);
                         let offset = self.emit_expression(cfg, basic_block_h, *right);
                         
-                        // Optimize based on 
-                        if self.casts.get(node_h) == Some(&TypeCast::LvalueToRvalue) {
-                            let load_inst = Instruction::LoadOffset(MemoryLocation::Expr(base), offset);
-                            let load_inst = cfg.add_inst(basic_block_h, load_inst);
-                            load_inst
-                        }
-                        else {
-                            let inst = Instruction::Lea(MemoryLocation::Expr(base));
-                            let inst = cfg.add_inst(basic_block_h, inst);
-                            let inst = Instruction::BinaryOp(hir::BinaryOpType::Add, inst, offset);
-                            let inst = cfg.add_inst(basic_block_h, inst);
-                            inst
-                        }
+                        // Could previously be optimized based on lvalue and rvalue things.
+                        let inst = cfg.add_inst(basic_block_h, Instruction::Lea(MemoryLocation::Expr(base)));
+                        let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(hir::BinaryOpType::Add, inst, offset));
+                        inst
+                        
                     }
                     _ => {
                         todo!();

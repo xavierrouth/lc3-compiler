@@ -84,6 +84,7 @@ impl <'ctx> Vistior<'ctx> for SymbolResolutionPass<'ctx> {
     // TODO: Should this really be in preorder??
     fn preorder(& mut self, node_h: ASTNodeHandle) -> () {
         let node = self.get(node_h).clone();
+        self.scopes.insert(node_h, self.curr_scope);
         match node {
             ASTNode::CompoundStmt { statements: _, new_scope } => {
                 if new_scope == true {

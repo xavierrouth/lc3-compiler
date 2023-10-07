@@ -14,18 +14,18 @@ use crate::symtab::{SymbolTable, VarDecl, ScopeHandle, Scope};
 
 
 pub struct TypecheckPass<'a> {
-    symbol_table: SymbolTable, // 
+    symbol_table: &'a mut SymbolTable, // 
     ast: AST,
 
     // Result:
     typed_ast: TypedAST,
 
 
-
     // Internal State
-    scopes: SparseSecondaryMap<ASTNodeHandle, ScopeHandle>,
+    scopes: SparseSecondaryMap<ASTNodeHandle, ScopeHandle>, // This should be inside symbol_table
     halt: bool,
 
+    error_handler: &'a ErrorHandler<'a>,
     context: &'a Context<'a> //TODO: Merge error handler and context.
 }
 
@@ -38,8 +38,15 @@ pub enum LR {
 
 
 impl <'a> TypecheckPass<'a> { 
-    pub fn new(ast: AST, symbol_table: SymbolTable, context: &'a Context<'a>, scopes: SparseSecondaryMap<ASTNodeHandle, ScopeHandle>,) -> TypecheckPass<'a> {
-        TypecheckPass { symbol_table, ast, typed_ast: TypedAST { nodes: SlotMap::with_key(), root: None }, scopes, halt: false, context, }
+    pub fn new(ast: AST, symbol_table: &'a mut SymbolTable, context: &'a Context<'a>, scopes: SparseSecondaryMap<ASTNodeHandle, ScopeHandle>, error_handler: &'a ErrorHandler<'a>,) -> TypecheckPass<'a> {
+        TypecheckPass { symbol_table, ast, typed_ast: TypedAST { nodes: SlotMap::with_key(), root: None }, scopes, halt: false, context, error_handler }
+    }
+
+    pub fn run(mut self) -> TypedAST {
+        let root = self.ast.root.expect("invalid root");
+        let root = self.check_program(root);
+        self.typed_ast.root = Some(root);
+        self.typed_ast
     }
 
     fn check_program(&mut self, node_h: ASTNodeHandle) -> TypedASTNodeHandle {
@@ -55,7 +62,12 @@ impl <'a> TypecheckPass<'a> {
         for decl_h in declarations {
             let decl = self.ast.remove(decl_h);
             match decl {
+                
                 ASTNode::VariableDecl { identifier, initializer, type_info } => {
+                    /* Global Variable Declarations get reduced to VarDecls in the programs globals vector, local variable declarations remain as ast nodes, as they will get split into 
+                     * an assignment + initialization during the lowering to hir (because they can be dynamically initialized), but must be allocated at beginning of functions.
+                     */
+                     
                     // TODO:
                     // Make sure initializer is const, reduce to an i32, and then just get a decl from the symbol table??
                     // this is SO messy and gross I hate it, store scope binding somewhere else.
@@ -69,7 +81,7 @@ impl <'a> TypecheckPass<'a> {
                 },
                 ASTNode::FunctionDecl { body, parameters, identifier, return_type } => {
                     // Frustrating wasted (union/enum)-tag dispatch, will compiler find some way to optimize?
-                    let func = self.check_function(decl_h);
+                    let func = self.check_function(body, parameters, identifier, return_type); // Already got removed so we need to put it back! Unlucky!.
                     functions.push(func);
                 },
                 ASTNode::RecordDecl {..} => {
@@ -85,15 +97,8 @@ impl <'a> TypecheckPass<'a> {
 
     }
 
-    fn check_function(&mut self, node_h: ASTNodeHandle) -> TypedASTNodeHandle {
-        let node = self.ast.remove(node_h);
-
-        let ASTNode::FunctionDecl { body, parameters, identifier, return_type } = node else {
-            panic!("invalid node for check function");
-        };
-
-        let mut locals = Vec::new();
-        let mut typed_parameters = Vec::new();
+    fn check_function(&mut self, body: ASTNodeHandle, parameters: Vec<ASTNodeHandle>, identifier: InternedString, return_type: InternedType) -> TypedASTNodeHandle {
+        let mut typed_parameters: Vec<VarDecl> = Vec::new();
 
         for param_h in parameters {
             let param = self.ast.remove(param_h);
@@ -107,30 +112,39 @@ impl <'a> TypecheckPass<'a> {
         }
 
         /* Typecheck the function body, while adding local variable declarations to the locals array */
-        let body = self.check_statement(&mut locals, body);
+        let body = self.check_statement(body);
 
         /* Build the final TypedASTNode */
-        let node = TypedASTNode::FunctionDecl { body, identifier, return_type, parameters: typed_parameters, locals };
+        let node = TypedASTNode::FunctionDecl { body, identifier, return_type, parameters: typed_parameters };
         self.typed_ast.nodes.insert(node)
     }
 
-    fn check_statement(&mut self, locals: &mut Vec<VarDecl>, node_h: ASTNodeHandle) -> TypedASTNodeHandle {
+    fn check_statement(&mut self, node_h: ASTNodeHandle) -> TypedASTNodeHandle {
         let node = self.ast.remove(node_h);
 
         match node {
             ASTNode::VariableDecl { identifier, initializer, type_info } => {
                 // TODO: Maintain mapping between declaration in C and where this is going to get lowered to.
                 let scope = self.scopes.get(node_h).expect("invalid node to scope mapping");
-                let decl = self.symbol_table.search_scope(scope, &identifier).expect("can't find decl");
-                locals.push(decl.clone());
+                let decl = self.symbol_table.search_scope(scope, &identifier).expect("can't find decl").clone();
                 // This doesn't return a node because it doesn't get lowered to anything, oops.
                 // Need to make 'Empty' node. 
-                self.typed_ast.nodes.insert(TypedASTNode::Empty)
+
+                let initializer = match initializer {
+                    Some(initializer) => {
+                        let (node, lr, ty) = self.try_lvalue_to_rvalue(initializer);
+                        // TODO Do typechecking on initializer
+                        Some(node)
+                    }
+                    None => None,
+                };
+
+                self.typed_ast.nodes.insert(TypedASTNode::VariableDecl { decl: decl, initializer, type_info })
             }
             ASTNode::CompoundStmt { statements, new_scope } => {
                 let mut typed_statements = Vec::new();
                 for stmt_h in statements {
-                    typed_statements.push(self.check_statement(locals, stmt_h));
+                    typed_statements.push(self.check_statement(stmt_h));
                 }
                 let node = TypedASTNode::CompoundStmt { statements: typed_statements };
                 self.typed_ast.nodes.insert(node)
