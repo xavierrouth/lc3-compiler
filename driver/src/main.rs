@@ -80,7 +80,7 @@ fn main() {
         // analyzer.print_symbol_table();
     } 
 
-    let mut typecheck: TypecheckPass<'_> = TypecheckPass::new(&mut analyzer.symbol_table, &ast, &context, &error_handler, analyzer.scopes);
+    let mut typecheck: TypecheckPass<'_> = TypecheckPass::new(&ast, &mut analyzer.symbol_table, &context, &error_handler);
 
     typecheck.traverse(*root);
 
