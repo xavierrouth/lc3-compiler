@@ -86,6 +86,11 @@ impl <'a> AST {
         self.nodes.get(node_h).unwrap()
     }
 
+    // Really no way to move out of a slotmap?
+    pub fn remove(&mut self, node_h: ASTNodeHandle) -> ASTNode {
+        self.nodes.remove(node_h).expect("invalid call to remove")
+    }
+
     pub fn functions(&self) -> Vec<ASTNodeHandle> {
         let mut vec = Vec::new();
         for (handle, data) in self.nodes.iter() {
@@ -402,7 +407,6 @@ impl<'a> ASTCheck<'a>{
 }
 
 impl <'a> Vistior<'a> for ASTCheck<'a> {
-
     fn preorder(&mut self, node_h: ASTNodeHandle) -> () {
         let node = self.get(node_h);
         self.results.push(std::mem::discriminant(&node));
@@ -443,7 +447,6 @@ impl <'a> Vistior<'a> for ASTPrint<'a> {
             let printable = ASTNodePrintable{ node: node.clone(), context: self.context};
             println!("{whitespace_string}{:}", printable);
         }
-        
     }
 
     fn postorder(&mut self, _node_h: ASTNodeHandle) -> () {

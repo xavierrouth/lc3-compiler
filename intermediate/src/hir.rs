@@ -5,7 +5,7 @@ use std::{cell::{RefCell, Cell}, rc::Rc, fmt::Display, alloc::Layout, collection
 
 use crate::TypedArena;
 
-use analysis::{typecheck::TypeCast, symbol_table::{SymbolTable, LocalVarDecl, ScopeHandle}};
+use analysis::{symtab::{VarDecl}};
 use lex_parse::{ast::{ASTNodeHandle, AST}, error::ErrorHandler, context::{InternedString, Context}};
 use slotmap::{SparseSecondaryMap, SlotMap, SecondaryMap};
 
@@ -18,12 +18,7 @@ slotmap::new_key_type! { pub struct BasicBlockHandle; }
 pub struct HIR {
     pub main: Option<i32>,
     pub functions: Vec<Rc<RefCell<CFG>>>,
-    pub data: Vec<DataEntry>,
-}
-
-pub struct DataEntry {
-    size: u32,
-    name: InternedString,
+    pub data: Vec<VarDecl>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,7 +61,7 @@ pub struct CFG {
     // Stack Frame:
     parameters_offset: usize,
     locals_offset: usize,
-    locals: HashMap<LocalVarDecl, MemoryLocation>, 
+    locals: HashMap<VarDecl, MemoryLocation>, 
 }
 
 #[derive(Debug, Clone)]
@@ -96,21 +91,23 @@ impl CFG {
         }
     }
 
-    pub fn get_location(&self, local: LocalVarDecl) -> MemoryLocation {
-        if !(self.locals.contains_key(&local)) {
-            panic!("variable does not belong to current function or hasn't been allocated yet.")
+    pub fn get_location(&self, local: VarDecl) -> &MemoryLocation {
+        match self.locals.get(&local) {
+            Some(local) => local,
+            None => panic!("variable does not belong to current function or hasn't been allocated yet.")
         }
-        self.locals.entry(local)
     }
 
-    pub fn add_parameter(&mut self, parameter: LocalVarDecl) -> () {
+    pub fn add_parameter(&mut self, parameter: VarDecl) -> () {
+        let size = parameter.size;
         self.locals.entry(parameter).or_insert(MemoryLocation::Parameter(self.parameters_offset));
-        self.parameters_offset += parameter.size;
+        self.parameters_offset += size;
     }
 
-    pub fn add_local(&mut self, local: LocalVarDecl, alloca: InstructionHandle) -> () { // Do we need scope information here? (scope: ScopeHandle)
+    pub fn add_local(&mut self, local: VarDecl, alloca: InstructionHandle) -> () { // Do we need scope information here? (scope: ScopeHandle)
+        let size = local.size;
         self.locals.entry(local).or_insert(MemoryLocation::Stack(alloca, self.locals_offset));
-        self.locals_offset += local.size;
+        self.locals_offset += size;
     }
 
     pub fn resolve_bb(&self, basic_block_h: BasicBlockHandle) -> &BasicBlock {
@@ -197,6 +194,7 @@ impl <'ctx> CFGPrintable<'ctx> {
                     MemoryLocation::Parameter(offset) => {
                         format!("%{} = Load Parameter {}", inst_name, offset)
                     }
+                    MemoryLocation::Expr(_) => todo!(),
                 }
             }
             Instruction::LoadOffset(_, _) => todo!(),
@@ -210,6 +208,7 @@ impl <'ctx> CFGPrintable<'ctx> {
                 MemoryLocation::Parameter(offset) => {
                     format!("Store Parameter {} <- {}", offset, self.get_name(operand))
                 }
+                MemoryLocation::Expr(_) => todo!(),
             }
             Instruction::StoreOffset(_, _, _) => todo!(),
             // BinaryOps:
@@ -272,7 +271,7 @@ pub type Operand = InstructionHandle;
 pub enum MemoryLocation {
     Stack(InstructionHandle, usize), // Store allocate instructon. Allocate instruction and size.
     Parameter(usize),
-    Expr(InstructionHandle),
+    Expr(InstructionHandle), // This is so annoying! 
     // This makes no sense.
     //GlobalOffset(i32),
     

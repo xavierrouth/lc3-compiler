@@ -3,7 +3,11 @@
 members = [
     "driver",
     "analysis",
-    "codegen",
+    # "codegen",
     "lex-parse",
     "intermediate",
+]
+
+exclude = [
+    "codegen",
 ]

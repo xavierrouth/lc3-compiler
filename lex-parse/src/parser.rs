@@ -15,7 +15,7 @@ use crate::ast::{AST, ASTNodeHandle, ASTNode, UnaryOpType, BinaryOpType};
 use crate::lexer::{Lexer};
 use crate::token::{Token, TokenKind};
 
-use crate::types::CType;
+use crate::types::BaseType;
 use crate::types::CVQual;
 use crate::types::StorageQual;
 use crate::types::{TypeSpecifier, DeclaratorPart, Type};
@@ -170,7 +170,7 @@ impl<'a> Parser<'a> {
 
         let specifier = self.parse_declaration_specifiers()?;
 
-        if let Some(CType::Struct( identifier)) = specifier.ctype {
+        if let Some(BaseType::Struct( identifier)) = specifier.base {
             return self.parse_struct_declaration(identifier);
         }
 
@@ -209,15 +209,15 @@ impl<'a> Parser<'a> {
 
         // TOOD: Check to see if these aren't set already.
         match self.peek_token().kind {
-            TokenKind::Int => specifier.ctype = Some(CType::Int),
-            TokenKind::Void => specifier.ctype = Some(CType::Void),
-            TokenKind::Char => specifier.ctype = Some(CType::Char),
+            TokenKind::Int => specifier.base = Some(BaseType::Int),
+            TokenKind::Void => specifier.base = Some(BaseType::Void),
+            TokenKind::Char => specifier.base = Some(BaseType::Char),
             TokenKind::Static => specifier.qualifiers.storage = StorageQual::Static,
             TokenKind::Const => specifier.qualifiers.cv = Some(CVQual::Const),
             TokenKind::Struct => {
                 self.get_token();
                 if let TokenKind::Identifier(tag) = self.peek_token().kind {
-                    specifier.ctype = Some(CType::Struct(tag));
+                    specifier.base = Some(BaseType::Struct(tag));
                     self.get_token();
                     // Messed up that this doesn't consume the identifier token.
                     return Ok(true);
@@ -429,9 +429,9 @@ impl<'a> Parser<'a> {
                 // Parse type information
                 let specifier = self.parse_declaration_specifiers()?;
 
-                match specifier.ctype {
-                    Some(CType::Int) |
-                    Some(CType::Char) => {
+                match specifier.base {
+                    Some(BaseType::Int) |
+                    Some(BaseType::Char) => {
                         match self.parse_declarator(false, true)? {
                             (declarator, None) => {
                                 let tok = self.peek_token();
@@ -449,7 +449,7 @@ impl<'a> Parser<'a> {
                         }
                     }
 
-                    Some(CType::Struct(tag)) => {
+                    Some(BaseType::Struct(tag)) => {
                         match self.parse_declarator(false, true)? {
                             (declarator, None) => {
                                 let tok = self.peek_token();
@@ -583,7 +583,7 @@ impl<'a> Parser<'a> {
 
     fn parse_for_init_clause(&mut self) -> Result<ASTNodeHandle, ParserError> {
         let specifier = self.parse_declaration_specifiers()?;
-        if specifier.ctype == Some(CType::Int) {
+        if specifier.base == Some(BaseType::Int) {
             let (declarator, identifier) = self.parse_declarator(false, true)?;
 
             let identifier = if identifier.is_none() {

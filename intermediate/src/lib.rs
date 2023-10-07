@@ -5,7 +5,6 @@ extern crate lazy_static;
 
 pub mod hir;
 pub mod hirgen;
-pub mod layout;
 pub mod lower;
 
 

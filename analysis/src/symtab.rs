@@ -6,56 +6,44 @@ use slotmap::{SparseSecondaryMap, SlotMap};
 
 slotmap::new_key_type! { pub struct ScopeHandle; }
 
+#[derive(Debug, Clone,  PartialEq, Eq, Hash)]
 pub struct Scope {
-    pub(crate) kind: ScopeKind,
-    pub(crate) declarations: Vec<LocalVarDecl>,
+    pub(crate) parent: Option<ScopeHandle>,
+    pub(crate) declarations: Vec<VarDecl>,
+    // pub(crate) tags: 
 }
 
-pub enum ScopeKind {
-    Function(ScopeHandle),
-    Block(ScopeHandle),
-    File,
-}
-
-// This could do to be a tagged enum:
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct FunctionDecl {
     pub identifier: InternedString, 
-    pub type_info: InternedType,
+    pub return_ty: InternedType,
+    pub parameters_ty: Vec<InternedType>,
     //TODO: info about parameters for type checking.
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LocalVarDecl {
-    pub scope: ScopeHandle, 
+pub struct VarDecl {
+    pub scope: ScopeHandle,
     pub identifier: InternedString, 
     pub size: usize,
     pub type_info: InternedType,
     pub is_parameter: bool,
 } 
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct GlobalVarDecl {
-    pub identifier: InternedString, 
-    pub size: usize,
-    pub type_info: InternedType,
-}
-
 // Type Context:
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldDecl {
-    pub identifier: InternedString,
+    pub identifier: InternedString, 
     pub size: usize,
     pub type_info: InternedType
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordDecl {
-    pub complete: bool,
-    pub identifier: InternedString,
-    pub size: usize,
-    pub fields: Vec<FieldDecl>, // LocalVarDecl, Offset 
+    pub(crate) complete: bool,
+    pub(crate) identifier: InternedString, 
+    pub(crate) size: usize,
+    pub(crate) fields: Vec<FieldDecl>,
 }
 
 
@@ -66,39 +54,28 @@ pub struct SymbolTable {
 
     // Codegen required:
     pub(crate) functions: Vec<FunctionDecl>,
-    pub(crate) globals: Vec<GlobalVarDecl>,
 
     pub root: Option<ScopeHandle>,
 
-    pub(crate) scope_arena: SlotMap<ScopeHandle, Scope>,
-
-    // TODO: Make  
-    //pub locals: Vec<LocalVarDecl>,
+    pub(crate) scopes: SlotMap<ScopeHandle, Scope>,
 }
 
-pub enum DeclRef {
-    LocalVar(LocalVarDecl),
-    Field(FieldDecl),
-    Function(FunctionDecl),
-    Global(GlobalVarDecl),
-}
 
 impl <'a> SymbolTable {
     pub fn new() -> SymbolTable {
         SymbolTable {  
             records: Vec::new(), 
             functions: Vec::new(), 
-            globals: Vec::new(),
             root: None,
-            scope_arena: SlotMap::with_key(),
+            scopes: SlotMap::with_key(),
         }
     }
 
     pub fn resolve_scope(&self, scope_h: ScopeHandle) -> &Scope {
-        self.scope_arena.get(scope_h).expect("invalid handle")
+        self.scopes.get(scope_h).expect("invalid handle")
     }
 
-    pub fn search_function(&self, identifier: &InternedString) -> Option<&FunctionDecl> {
+    pub fn get_function(&self, identifier: &InternedString) -> Option<&FunctionDecl> {
         for entry in &self.functions {
             if entry.identifier == *identifier {
                 return Some(entry)
@@ -107,18 +84,8 @@ impl <'a> SymbolTable {
         None
     }
     
-
-    pub fn search_global(& self, identifier: &InternedString) -> Option<&GlobalVarDecl> {
-        for entry in &self.globals {
-            if entry.identifier == *identifier {
-                return Some(entry)
-            }
-        }
-        None
-    }
-
     // TODO: search for structs vs enums vs unions.
-    pub fn search_record(& self, identifier: &InternedString) -> Option<&RecordDecl> {
+    pub fn get_record(& self, identifier: &InternedString) -> Option<&RecordDecl> {
         for record in &self.records {
             if *identifier == record.identifier {
                 return Some(record);
@@ -127,8 +94,9 @@ impl <'a> SymbolTable {
         None
     }
 
-    pub fn search_local(&self, scope: ScopeHandle, identifier: &InternedString) -> Option<&LocalVarDecl> {
-        for entry in &self.resolve_scope(scope).declarations {
+
+    pub fn search_scope(&self, scope: &ScopeHandle, identifier: &InternedString) -> Option<&VarDecl> {
+        for entry in &self.resolve_scope(*scope).declarations {
             if entry.identifier == *identifier {
                 return Some(&entry)
             }
@@ -137,28 +105,24 @@ impl <'a> SymbolTable {
         None
     }
 
-    pub fn search_local_up(& self, scope: ScopeHandle, identifier: &InternedString) -> Option<&LocalVarDecl> {
-        // This is so disgustingly messy. 
-        type S = ScopeKind;
-        let parent = match self.resolve_scope(scope).kind {
-            S::Function(parent )=> parent,
-            S::File => return None,
-            S::Block(parent) => parent,
-        };
-
-        match self.search_local_up(parent, identifier) {
+    pub fn search_tree(& self, scope: &ScopeHandle, identifier: &InternedString) -> Option<&VarDecl> {
+        match self.search_scope(&scope, identifier) {
             Some(entry) => Some(entry),
-            None => self.search_local(scope, identifier),
+            None => {
+                let Some(parent) = self.scopes.get(*scope).expect("invalid scope handle").parent else {
+                    panic!()
+                };
+                self.search_tree(&parent, identifier)
+            }
         }
     }
 
-    
-    pub fn add_local_decl(&mut self, scope: ScopeHandle, node: ASTNodeHandle, entry: LocalVarDecl) -> Result<(), AnalysisError> {
-        if self.search_local(scope, &entry.identifier).is_some() {
-            Err(AnalysisError::AlreadyDeclared(entry.identifier, node))
+    pub fn add_var_decl(&mut self, scope: &ScopeHandle, node: &ASTNodeHandle, entry: VarDecl) -> Result<(), AnalysisError> {
+        if self.search_scope(scope, &entry.identifier).is_some() {
+            Err(AnalysisError::AlreadyDeclared(entry.identifier, *node))
         }
         else {
-            self.scope_arena.get_mut(scope)
+            self.scopes.get_mut(*scope)
                 .expect("invalid handle")
                 .declarations.push(entry);
             Ok(())
@@ -166,7 +130,7 @@ impl <'a> SymbolTable {
     }
 
     pub fn add_function_decl(&'a mut self, node: ASTNodeHandle, entry: FunctionDecl) -> Result<(), AnalysisError> {
-        if self.search_function(&entry.identifier).is_some() {
+        if self.get_function(&entry.identifier).is_some() {
             Err(AnalysisError::AlreadyDeclared(entry.identifier, node))
         }
         else {
@@ -181,12 +145,12 @@ impl <'a> SymbolTable {
 
 
 // Display Things
-pub(crate) struct LocalVarDeclPrintable<'a> {
-    pub(crate) declaration: LocalVarDecl,
+pub(crate) struct VarDeclPrintable<'a> {
+    pub(crate) declaration: VarDecl,
     pub(crate) context: &'a Context<'a>
 }
 
-impl fmt::Display for LocalVarDeclPrintable<'_> {
+impl fmt::Display for VarDeclPrintable<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let decl = &self.declaration;
         let type_info = self.context.resolve_type(&decl.type_info);

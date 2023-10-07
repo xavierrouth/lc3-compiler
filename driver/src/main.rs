@@ -1,7 +1,8 @@
 #![deny(rust_2018_idioms)]
 use std::{path::PathBuf, fs::File, io::Read};
-use analysis::{analysis::Analyzer, typecheck::{Typecheck, TypedASTPrint}};
+use analysis::{symres::SymbolResolutionPass, typecheck::{TypecheckPass}};
 use clap::{Parser};
+use intermediate::hirgen::{self, HIRGen};
 //use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
 
@@ -60,36 +61,40 @@ fn main() {
         Err(error) => {error_handler.print_parser_error(error); return},
     };
 
-    let root =&ast.root.unwrap();
+    let root = &ast.root.unwrap();
     if cli.verbose {
         let mut printer: ASTPrint<'_> = ASTPrint::new(false, &ast, &context);
-        printer.traverse(root);
+        printer.traverse(*root);
     }
 
-    let mut analyzer: Analyzer<'_> = Analyzer::new(&ast, &context, &error_handler);
+    let mut analyzer: SymbolResolutionPass<'_> = SymbolResolutionPass::new(&ast, &context, &error_handler);
     
     // Check for analysis errors
-    analyzer.traverse(root);
+    analyzer.traverse(*root);
 
     if *error_handler.fatal.borrow() {
         return;
     }
 
     if cli.verbose {
-        analyzer.print_symbol_table();
+        // analyzer.print_symbol_table();
     } 
 
-    let mut typecheck: Typecheck<'_> = Typecheck::new(&mut analyzer.symbol_table, &ast, &context, &error_handler);
+    let mut typecheck: TypecheckPass<'_> = TypecheckPass::new(&mut analyzer.symbol_table, &ast, &context, &error_handler, analyzer.scopes);
 
-    typecheck.traverse(root);
+    typecheck.traverse(*root);
 
     if cli.verbose {
+        /*
         let mut typed_printer = TypedASTPrint::new(false, &ast, &context, typecheck.types, typecheck.lr, typecheck.casts.clone());
-        typed_printer.traverse(root);
+        typed_printer.traverse(*root);  */
     };
 
     let casts = typecheck.casts;
 
+    
+
+    /* 
     let mut printer = codegen::asmprinter::AsmPrinter::new();
     let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, &context, analyzer.symbol_table, casts);
 
@@ -99,7 +104,7 @@ fn main() {
         Some(file) => file,
         None => PathBuf::from(r"/out.asm")
     };
-    printer.print_to_file(outfile);
+    printer.print_to_file(outfile); */
 
     //println!("two: {:?}", cli.verbose);  */
 

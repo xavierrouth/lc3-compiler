@@ -12,6 +12,8 @@ pub type InternedString = SymbolU16;
 pub struct Context<'ctx> {
     strings: RefCell<StringInterner<StringBackend<InternedString>>>, 
     types: RefCell<TypeInterner>,
+    
+    // This is debug info:
     tokens: RefCell<SecondaryMap<ASTNodeHandle, Token>>,
     src: &'ctx str,
 }

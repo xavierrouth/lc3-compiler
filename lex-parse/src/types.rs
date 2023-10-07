@@ -23,7 +23,7 @@ pub enum StorageQual {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]  
-pub enum CType {
+pub enum BaseType {
     #[default]
     Int,
     Char,
@@ -63,16 +63,16 @@ impl fmt::Display for Qualifiers {
 
 impl fmt::Display for TypeSpecifierPrintable<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.specifier.ctype {
-            Some(ctype) => {
-                let ctype = match ctype {
-                    CType::Int => format!("int"),
-                    CType::Char => format!("char"),
-                    CType::Void => format!("void"),
-                    CType::Struct(tag) => format!("struct {}", self.context.resolve_string(*tag)),
+        match &self.specifier.base {
+            Some(base) => {
+                let base = match base {
+                    BaseType::Int => format!("int"),
+                    BaseType::Char => format!("char"),
+                    BaseType::Void => format!("void"),
+                    BaseType::Struct(tag) => format!("struct {}", self.context.resolve_string(*tag)),
                     _ => format!("type unprintable"),
                 };
-                write!(f, "{}{}", self.specifier.qualifiers, ctype)
+                write!(f, "{}{}", self.specifier.qualifiers, base)
             }
             
             None => write!(f, "{}", self.specifier.qualifiers),
@@ -84,7 +84,7 @@ impl fmt::Display for TypeSpecifierPrintable<'_> {
 #[derive(Debug, Clone, Default)]
 pub struct TypeSpecifier {
     pub qualifiers: Qualifiers,
-    pub ctype: Option<CType>,
+    pub base: Option<BaseType>,
 }
 
 pub struct TypeSpecifierPrintable<'a> {
@@ -95,7 +95,7 @@ pub struct TypeSpecifierPrintable<'a> {
 impl Hash for TypeSpecifier {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.qualifiers.hash(state); //DONT HASH QUALIFIERS
-        self.ctype.hash(state);
+        self.base.hash(state);
     }
 }
 
@@ -103,14 +103,14 @@ impl Eq for TypeSpecifier {}
 
 impl PartialEq for TypeSpecifier {
     fn eq(&self, other: &Self) -> bool {
-        self.ctype == other.ctype
+        self.base == other.base
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeclaratorPart {
-    FunctionDecl(CType),
-    PointerDecl(Option<CType>),
+    FunctionDecl(BaseType),
+    PointerDecl(Option<BaseType>),
     ArrayDecl(usize),
 }
 
@@ -160,9 +160,9 @@ impl Type {
     }
 
     pub fn is_record(&self) -> bool {
-        match self.specifier.ctype{
-            Some(CType::Struct(_)) |
-            Some(CType::Enum(_)) => true,
+        match self.specifier.base{
+            Some(BaseType::Struct(_)) |
+            Some(BaseType::Enum(_)) => true,
             _ => false,
         }
     }
