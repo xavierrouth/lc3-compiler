@@ -1,6 +1,10 @@
 int main() {
     int a;
-    int b = a;
-    int d[10];
-    
+
+    a = 4;
+
+    if (1) {
+        a = 3;
+    }
+
 }

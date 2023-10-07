@@ -94,7 +94,7 @@ fn main() {
         typed_printer.traverse(ast.root.expect("invalid root"));
     };
 
-    let mut hirgen = HIRGen::new(ast, symbtab, &context, &error_handler);
+    let hirgen = HIRGen::new(ast, symbtab, &context, &error_handler);
 
     let hir: HIR<'_> = hirgen.run();
 

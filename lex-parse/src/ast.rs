@@ -292,7 +292,6 @@ pub trait Vistior<'a> {
         match node {
             ASTNode::BinaryOp { op: _, right, left } => {
                 self.traverse(left);
-                self.traverse(left);
                 self.traverse(right);
             }
             ASTNode::UnaryOp { op: _, child, order: _ } => {

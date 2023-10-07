@@ -157,7 +157,17 @@ impl <'a> TypecheckPass<'a> {
             ASTNode::ReturnStmt { expression } => todo!(),
             ASTNode::ForStmt { initializer, condition, update, body } => todo!(),
             ASTNode::WhileStmt { condition, body } => todo!(),
-            ASTNode::IfStmt { condition, if_branch, else_branch } => todo!(),
+            ASTNode::IfStmt { condition, if_branch, else_branch } => {
+                let (condition, lr, ty) = self.try_lvalue_to_rvalue(condition);
+
+                let else_branch =  match else_branch {
+                    Some(else_branch) => Some(self.check_statement(else_branch)),
+                    None => None,
+                };
+
+                let node = TypedASTNode::IfStmt { condition, if_branch: self.check_statement(if_branch), else_branch};
+                self.typed_ast.nodes.insert(node)
+            }
             ASTNode::BreakStmt => todo!(),
             ASTNode::DeclStmt { declarations } => todo!(),
             ASTNode::InlineAsm { assembly } => todo!(),

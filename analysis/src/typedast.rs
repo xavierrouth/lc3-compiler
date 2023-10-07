@@ -236,7 +236,6 @@ pub trait TypedVistior<'a> {
         match node {
             TypedASTNode::BinaryOp { op: _, right, left, ty } => {
                 self.traverse(left);
-                self.traverse(left);
                 self.traverse(right);
             }
             TypedASTNode::UnaryOp { op: _, child, order: _, ty } => {
