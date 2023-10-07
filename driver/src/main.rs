@@ -2,7 +2,7 @@
 use std::{path::PathBuf, fs::File, io::Read};
 use analysis::{symres::SymbolResolutionPass, typecheck::{TypecheckPass}, typedast::{TypedASTPrint, TypedVistior}};
 use clap::{Parser};
-// use intermediate::hirgen::{self, HIRGen};
+use intermediate::{hirgen::{self, HIRGen}, hir::HIR};
 //use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
 
@@ -93,6 +93,12 @@ fn main() {
         let mut typed_printer = TypedASTPrint::new(false, &ast, &context);
         typed_printer.traverse(ast.root.expect("invalid root"));
     };
+
+    let mut hirgen = HIRGen::new(ast, symbtab, &context, &error_handler);
+
+    let hir: HIR<'_> = hirgen.run();
+
+    hir.print();
 
 
     /* 

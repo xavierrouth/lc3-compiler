@@ -1,7 +1,7 @@
 
 
 
-use std::{cell::{RefCell, Cell}, rc::Rc, fmt::Display, alloc::Layout, collections::HashMap};
+use std::{cell::{RefCell, Cell}, rc::Rc, fmt::{Display, write}, alloc::Layout, collections::HashMap};
 
 use crate::TypedArena;
 
@@ -15,10 +15,21 @@ slotmap::new_key_type! { pub struct InstructionHandle; }
 slotmap::new_key_type! { pub struct BasicBlockHandle; }
 
 /* High level IR, generated from AST, moved to SSA form, DCE,  */
-pub struct HIR {
+pub struct HIR<'ctx> {
     pub main: Option<i32>,
     pub functions: Vec<Rc<RefCell<CFG>>>,
     pub data: Vec<VarDecl>,
+    pub context: &'ctx Context<'ctx>,
+}
+
+impl <'ctx> HIR<'ctx> {
+    pub fn print(& self) -> () {
+        for func in &self.functions {
+            let cfg = func.borrow().clone();
+            let printable = CFGPrintable::new(cfg, self.context);
+            printable.print();
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +61,7 @@ pub enum UnaryOpType {
     BinNot, 
 }
 
+/* =============== Control FLow Graph ============ */
 /* CFG for a single function */
 #[derive(Debug, Clone)]
 pub struct CFG {
@@ -147,6 +159,20 @@ pub struct CFGPrintable<'ctx> {
 }
 
 impl <'ctx> CFGPrintable<'ctx> {
+    pub fn new(cfg: CFG, context: &'ctx Context<'ctx>) -> CFGPrintable<'ctx> {
+        CFGPrintable { cfg, context, 
+            names: RefCell::new(SecondaryMap::new()), 
+            counter: RefCell::new(0) }
+    }
+
+    pub fn print(&self) {
+        println!("{}:", self.context.resolve_string(self.cfg.name));
+        // We really should maintain an ordering of basic blocks in the cfg.
+        for bb in self.cfg.basic_block_arena.keys() {
+            self.print_bb(bb);
+        }
+    }
+
     pub fn print_bb(&self, basic_block_h: BasicBlockHandle) {
         let bb = self.cfg.basic_block_arena.get(basic_block_h).expect("basic block handle not valid");
         for inst in &bb.instructions {
@@ -175,7 +201,6 @@ impl <'ctx> CFGPrintable<'ctx> {
     }
 
     pub fn print_inst(&self, inst_h: &InstructionHandle) {
-
         let inst = self.cfg.instruction_arena.get(*inst_h).expect("instruction handle not valid");
 
         let inst_name = self.get_name(inst_h);
@@ -220,7 +245,9 @@ impl <'ctx> CFGPrintable<'ctx> {
             Instruction::UnaryOp(_, _) => todo!(),
             
             // A.
-            Instruction::Const(_) => todo!(),
+            Instruction::Const(val) => {
+                format!("%{} = {val}", inst_name)
+            }
             Instruction::Call(_) => todo!(),
             Instruction::Lea(_) => todo!(),
         };

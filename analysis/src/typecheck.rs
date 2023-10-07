@@ -209,7 +209,7 @@ impl <'a> TypecheckPass<'a> {
                 let ty = decl.type_info;
 
                 let node = TypedASTNode::SymbolRef { identifier, decl: decl.clone(), ty};
-                (self.typed_ast.nodes.insert(node), LR::RValue, self.get_int_type())
+                (self.typed_ast.nodes.insert(node), LR::LValue, self.get_int_type())
             }
             ASTNode::FieldRef { identifier } => todo!(),
             ASTNode::BinaryOp { op, left, right } => {

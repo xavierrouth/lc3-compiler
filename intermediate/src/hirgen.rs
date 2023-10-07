@@ -13,35 +13,31 @@ pub struct HIRGen<'a> {
     ast: TypedAST,
     context: &'a Context<'a>,
     
-    hir: HIR,
+    hir: HIR<'a>,
 }
 
 
 impl <'a> HIRGen<'a> {
     pub fn new(ast: TypedAST, symbol_table: SymbolTable, context: &'a Context<'a>, 
-        locations: HashMap<VarDecl, MemoryLocation>, 
         error_handler: &'a ErrorHandler<'a>) -> HIRGen<'a> {
-            HIRGen { symbol_table , ast , context, hir: HIR { main: None, functions: Vec::new(), data: Vec::new() } }
+            HIRGen { symbol_table , ast , context, hir: HIR { main: None, functions: Vec::new(), data: Vec::new(), context } }
     }
 
-    pub fn run(&mut self) -> HIR {
+    pub fn run(mut self) -> HIR<'a> {
         let root = self.ast.root.expect("invalid root");
-        let root = self.ast.get(root);
+        let root = self.ast.remove(root);
         let TypedASTNode::Program { functions, globals } = root else {panic!("root is not of type 'program'")};
 
         for function in functions {
-            let cfg = self.build_function_cfg(*function);
+            let cfg = self.build_function_cfg(function);
             self.hir.functions.push(Rc::new(RefCell::new(cfg)));
         }
-
-        todo!();
-            
+        self.hir
     }
 
     fn emit_expression(&mut self, cfg: &mut CFG, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> InstructionHandle {
-        let node = self.ast.get(node_h);
+        let node = self.ast.remove(node_h);
         match node {
-            TypedASTNode::Empty => todo!(),
             TypedASTNode::IntLiteral { value } => todo!(),
             TypedASTNode::LvalueToRvalue { child, ty } => {
                 // TODO Optimization Potential: reduce LValueToRValue on SymbolRef to load form SymbolRef location.
@@ -51,7 +47,7 @@ impl <'a> HIRGen<'a> {
                 // Wow, seems like these could all be handled by similar code?
 
                 // How to pattern match on handles. You can't really huh!.
-                let child = self.emit_expression(cfg, basic_block_h, *child);
+                let child = self.emit_expression(cfg, basic_block_h, child);
                 let loc = MemoryLocation::Expr(child);
                 let load = Instruction::Load(loc);
                 let load = cfg.add_inst(basic_block_h, load);
@@ -72,23 +68,22 @@ impl <'a> HIRGen<'a> {
             TypedASTNode::BinaryOp { op, left, right, ty } => {
                 match op {
                     ast::BinaryOpType::Assign => {
-                        let rhs = self.emit_expression(cfg, basic_block_h, *right);
+                        let rhs = self.emit_expression(cfg, basic_block_h, right);
                         // Previously we have optimized here, but IG we will just do that later *shrug*.
-                        let lhs = self.emit_expression(cfg, basic_block_h, *left);
+                        let lhs = self.emit_expression(cfg, basic_block_h, left);
                         // Treat LHS as a memory location.
                         let loc = MemoryLocation::Expr(lhs);
                         let store = Instruction::Store(loc, rhs);
                         rhs
                     }
                     ast::BinaryOpType::ArrayAccess => {
-                        let base = self.emit_expression(cfg, basic_block_h, *left);
-                        let offset = self.emit_expression(cfg, basic_block_h, *right);
+                        let base = self.emit_expression(cfg, basic_block_h, left);
+                        let offset = self.emit_expression(cfg, basic_block_h, right);
                         
                         // Could previously be optimized based on lvalue and rvalue things.
                         let inst = cfg.add_inst(basic_block_h, Instruction::Lea(MemoryLocation::Expr(base)));
                         let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(hir::BinaryOpType::Add, inst, offset));
                         inst
-                        
                     }
                     _ => {
                         todo!();
@@ -104,20 +99,34 @@ impl <'a> HIRGen<'a> {
 
     // By nature of using arenas and handles, all references are mutable, should there be separate types?
     fn build_function_bb(&mut self, cfg: &mut CFG, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> () {
-        let node = self.ast.get(node_h);
+        let node = self.ast.remove(node_h);
         match node {
-            // Local Variable.
+            // Non-Control changing statements
             TypedASTNode::IntLiteral { value } => {
-                cfg.add_inst(basic_block_h, Instruction::Const(*value));
+                cfg.add_inst(basic_block_h, Instruction::Const(value));
             }
-            TypedASTNode::ExpressionStmt { expression } => {self.emit_expression(cfg, basic_block_h, *expression);},
+            TypedASTNode::VariableDecl { decl, initializer, type_info } => {
+                let size = cfg.get_const(cfg.entry, decl.size.try_into().unwrap());
+                // Parameter:
+                let alloca = cfg.add_to_entry(Instruction::Allocate(size)); // Add an alloca instruction to entry bb
+                cfg.add_local(decl.clone(), alloca); // Add alloca and decl to the locals of the CFG.
+                // Unclear if we need separate Alloca instructions.
+            }
+            TypedASTNode::DeclStmt { declarations } => todo!(),
+            TypedASTNode::InlineAsm { assembly } => todo!(),
+            TypedASTNode::ExpressionStmt { expression } => {self.emit_expression(cfg, basic_block_h, expression);},
+            TypedASTNode::CompoundStmt { statements } => {
+                for stmt in statements {
+                    self.build_function_bb(cfg, basic_block_h, stmt);
+                }
+            }
+            // Control changing statements
             TypedASTNode::ReturnStmt { expression } => todo!(),
             TypedASTNode::ForStmt { initializer, condition, update, body } => todo!(),
             TypedASTNode::WhileStmt { condition, body } => todo!(),
             TypedASTNode::IfStmt { condition, if_branch, else_branch } => todo!(),
             TypedASTNode::BreakStmt => todo!(),
-            TypedASTNode::DeclStmt { declarations } => todo!(),
-            TypedASTNode::InlineAsm { assembly } => todo!(),
+            
             _ => todo!()
         }
     }
@@ -130,45 +139,25 @@ impl <'a> HIRGen<'a> {
     // is CFG -> CFG preferred or just &mut CFG -> (). Interesting question
     /* Builds a CFG for a function. */
     fn build_function_cfg(&mut self, node_h: TypedASTNodeHandle) -> CFG {
-        let node = self.ast.get(node_h); // ast.remove() instead??
+        let node = self.ast.remove(node_h); // ast.remove() instead??
 
-        let TypedASTNode::FunctionDecl { body, identifier, return_type, parameters, locals } = node else {
+        let TypedASTNode::FunctionDecl { body, identifier, return_type, parameters } = node else {
             panic!("build function called on non-function node");
         };
 
         let name = identifier;
         //let func_name = self.context.resolve_string(*func_name);
-        let mut cfg = CFG::new(*name);
+        let mut cfg = CFG::new(name);
 
         // Take ownership of params from symbol table probably. We don't want symbol table anymore in HIR.
         for parameter in parameters {
             cfg.add_parameter(parameter.clone());
         }
-
-        // Generate entry basicb block
-
-        todo!();
-        for local in locals {
-            // Assume non-static and constant size for now
-
-            let size = cfg.get_const(cfg.entry, local.size.try_into().unwrap());
-            // Parameter:
-            if decl.is_parameter {
-                cfg.add_parameter(decl.clone());
-            } else { // Local:  
-                let alloca = cfg.add_to_entry(Instruction::Allocate(size));
-                cfg.add_local(decl.clone(), alloca);
-            }
-
-            cfg.add_to_entry(inst)
-        }
-
-        match node {
-            // These should all be errors lowkey.
-            _ => panic!()
-
-        }
-        todo!()
+        
+        let entry = cfg.entry;
+        // Generate 
+        self.build_function_bb(&mut cfg, entry, body);
+        cfg
 
     }
 

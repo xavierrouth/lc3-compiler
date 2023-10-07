@@ -28,6 +28,10 @@ impl <'a> TypedAST {
         self.nodes.get(node_h).unwrap()
     }
 
+    pub fn remove(&mut self, node_h: TypedASTNodeHandle) -> TypedASTNode {
+        self.nodes.remove(node_h).expect("invalid call to remove")
+    }
+
     pub fn functions(&self) -> Vec<TypedASTNodeHandle> {
         let mut vec = Vec::new();
         for (handle, data) in self.nodes.iter() {

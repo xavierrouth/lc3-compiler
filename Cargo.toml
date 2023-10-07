@@ -5,7 +5,7 @@ members = [
     "analysis",
     # "codegen",
     "lex-parse",
-    # "intermediate",
+    "intermediate",
 ]
 
 exclude = [
