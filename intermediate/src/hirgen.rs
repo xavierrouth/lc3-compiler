@@ -111,6 +111,13 @@ impl <'a> HIRGen<'a> {
                 let alloca = cfg.add_to_entry(Instruction::Allocate(size)); // Add an alloca instruction to entry bb
                 cfg.add_local(decl.clone(), alloca); // Add alloca and decl to the locals of the CFG.
                 // Unclear if we need separate Alloca instructions.
+                // 
+                if let Some(initializer) = initializer {
+                    let init = self.emit_expression(cfg, basic_block_h, initializer);
+                    let loc = cfg.get_location(decl.clone());
+                    cfg.add_inst(basic_block_h, Instruction::Store(loc.clone(), init));
+                }
+                
             }
             TypedASTNode::DeclStmt { declarations } => todo!(),
             TypedASTNode::InlineAsm { assembly } => todo!(),

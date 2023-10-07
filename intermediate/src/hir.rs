@@ -219,21 +219,25 @@ impl <'ctx> CFGPrintable<'ctx> {
                     MemoryLocation::Parameter(offset) => {
                         format!("%{} = Load Parameter {}", inst_name, offset)
                     }
-                    MemoryLocation::Expr(_) => todo!(),
+                    MemoryLocation::Expr(inst) => {
+                        format!("%{} = Load Expr %{}", inst_name, self.get_name(inst))
+                    }
                 }
             }
             Instruction::LoadOffset(_, _) => todo!(),
             Instruction::Store(location, operand) => match location {
                 MemoryLocation::Stack(allocate_inst, ..) => {
-                    format!("Store Stack %{} <- {}", self.get_name(allocate_inst), self.get_name(operand))
+                    format!("Store Stack %{} <- %{}", self.get_name(allocate_inst), self.get_name(operand))
                 }
                 MemoryLocation::DataSection(string) => {
-                    format!("Store Data Section %{} <- {}", self.context.resolve_string(*string), self.get_name(operand))
+                    format!("Store Data Section %{} <- %{}", self.context.resolve_string(*string), self.get_name(operand))
                 }
                 MemoryLocation::Parameter(offset) => {
-                    format!("Store Parameter {} <- {}", offset, self.get_name(operand))
+                    format!("Store Parameter %{} <- %{}", offset, self.get_name(operand))
                 }
-                MemoryLocation::Expr(_) => todo!(),
+                MemoryLocation::Expr(inst) => {
+                    format!("%{} = Store Expr %{}", inst_name, self.get_name(inst))
+                }
             }
             Instruction::StoreOffset(_, _, _) => todo!(),
             // BinaryOps:
@@ -249,7 +253,9 @@ impl <'ctx> CFGPrintable<'ctx> {
                 format!("%{} = {val}", inst_name)
             }
             Instruction::Call(_) => todo!(),
-            Instruction::Lea(_) => todo!(),
+            Instruction::Lea(location) => {
+                format!("%{} = Lea {:?}", inst_name, location)
+            }
         };
         println!("{out}");
     }
