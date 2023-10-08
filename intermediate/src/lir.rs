@@ -1,6 +1,205 @@
 
 /** Basically LC3 at list point, should be pretty darn close. */
+/* Not sure what the practical difference is between this and the /codegen instructions, maybe this isn't verified, 
+but everything should be target specific at this point (so its codegen'd, not really intermediate). 
+* Honestly lets just print a verified version of this. */
 
+/* Here are some goals about this IR:
+ * No information about functions, that doesn't exist, we only have labels, instructions, and data.
+ * Starts in SSA and then register allocation to non-ssa? Probably somethjing like that makes sense.
+ * 
+ * Some optimizations / passes we want to do here
+ *  Condition code analysis
+ *  Peephole optimizations (is this just pattern matching again kinda)
+ *  Register Allocation
+ *  
+ *  
+ *  Pattern matching instruction selection? (what does this even mean lol)
+ *  What else is there to do?
+ * 
+ *  Is this just an instruction DAG  for each BasicBlock -> Block?
+ * 
+ */
+
+ /* At this point give up on trying to do analysis on anything that is in memory (overflowed things). That is a completely reasonable decision right? 
+  * */
+
+use lex_parse::context::{InternedString, Context};
+use slotmap::SlotMap;
+
+slotmap::new_key_type! { pub struct InstHandle; }
+
+#[derive(Debug, Clone)]
+pub struct LIR<'ctx> {
+    // This is confusing, maybe we should do something about it. What even happens after register allocation?
+
+    // Pre register allocation
+    pub instruction_arena: SlotMap<InstHandle, Inst>,
+
+    // Total odering because fallthrough matters?
+    pub functions: Vec<Function>,
+
+    // Data section, 
+    pub data: Vec<Data>,
+
+    pub context: &'ctx Context<'ctx>,
+}
+
+impl <'ctx> LIR <'ctx> {
+    pub fn print(&self) -> (){
+        println!("hi bingle :)")
+    }
+}
+/* Eventually we could have different function types that support different calling converntions,
+*  This represents a function with the classic C calling convention. */
+#[derive(Debug, Clone, PartialEq)]
+pub struct Function {
+    pub(crate) name: InternedString,
+    pub(crate) blocks: Vec<Block>,
+    pub(crate) setup: Block,
+    pub(crate) teardown: Block,
+    pub(crate) optimize: bool,
+    /* TODO: Add a field represnting the stack frame maybe? Mapping certain ops to memory locations. */
+    pub(crate) stack_frame: HashMap<InstructionHandle, i32> // i32 is stack offset.
+}
+
+/* Not a basic block, just a block, this is lower level in the same way as explained above*/
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub(crate) label: Label,
+    pub(crate) instructions: Vec<InstHandle>,
+    pub(crate) optimize: bool, // Whether we are allowed to touch this for optimizations.
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Label {
+    Label(InternedString)
+}
+
+
+/* TODO: Potentially support inlining of these. */
+#[derive(Debug, Clone, PartialEq)]
 pub enum SubroutineKind {
-    Multiply()
+    Multiply(Register, Register), // TODO: Different versions based on sign.
+    Divide(Register, Register),
+    Lshift(Register, Register),
+    Rshift(Register, Register),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrapKind {
+
+}
+
+pub type Immediate = i32;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Register {
+    // Zero Register is a virtual Register aswell, 
+    VRegister(InstHandle), /* Virtual Register, infinite  */
+    //ZeroRegister,
+
+    HRegister(usize), /* Hardware Register, in between 0 and 3 probably */
+    StackPointer,
+    FramePointer,
+} 
+
+impl From<InstHandle> for Register {
+    fn from(value: InstHandle) -> Self {
+        Register::VRegister(value)
+    }
+}
+
+// I have re-invented pointer object-oriented downcasts?
+impl TryFrom<RegisterOrImmediate> for Register {
+    type Error = &'static str;
+
+    fn try_from(value: RegisterOrImmediate) -> Result<Self, Self::Error> {
+        match value {
+            RegisterOrImmediate::Register(value) =>  Ok(value),
+            RegisterOrImmediate::Immediate(value) => Err("Bad!"),
+        }
+    }
+}
+
+impl TryFrom<RegisterOrImmediate> for Immediate {
+    type Error = &'static str;
+
+    fn try_from(value: RegisterOrImmediate) -> Result<Self, Self::Error> {
+        match value {
+            RegisterOrImmediate::Register(_) => Err("Bad!"),
+            RegisterOrImmediate::Immediate(value) => Ok(value),
+        }
+    }
+}
+/* At some point we need to decide if this will actually be access using global register ptr (R4), or with just names and hope they are close enough. */
+#[derive(Debug, Clone, PartialEq)]
+pub enum Data {
+    String(InternedString),
+    Array(),
+    Empty(),
+    Struct() // Don't support these for now.
+
+}
+
+// Surely there is a way to implement this automatically
+#[derive(Debug, Clone, PartialEq)]
+pub enum RegisterOrImmediate {
+    Register(Register),
+    Immediate(Immediate),
+}
+
+impl From<Register> for RegisterOrImmediate {
+    fn from(value: Register) -> Self {
+        RegisterOrImmediate::Register(value)
+    }
+}
+
+impl From<Immediate> for RegisterOrImmediate {
+    fn from(value: Immediate) -> Self {
+        RegisterOrImmediate::Immediate(value)
+    }
+}
+
+
+/* We use Inst in LIR, instead of Instruction (in HIR), because Inst is smaller and thus closer to the assembly. */
+/* How to model dataflow? Do we even need to at this stage? (Yes, we want that). */
+
+
+/* TODO: I want to eliminate the possibility that lc3 instructions that don't output into a register are used as ops,
+*  I'm not sure how to do that yet, probably just by messing with how these types are set up */
+#[derive(Debug, Clone, PartialEq)]
+pub enum Inst {
+    /* Dataflow Instructions (Should we remove result register?) */ 
+    /* Unclear if it makes sense to distinguish between register vs immediates here,  */
+    Add(RegisterOrImmediate, RegisterOrImmediate),
+    And(RegisterOrImmediate, RegisterOrImmediate),
+    //AddReg(Register, Register),
+    //AddImm(Register, Immediate),
+    //AndReg(Register, Register),
+    //AndImm(Register, Immediate),
+    Not(Register),
+
+    St(Label),
+    Sti(Register, Label),
+    Str(Register, Register, Immediate),
+    Ld(Register, Label), // Should be Label or immediate, but almost always Label
+    Ldi(Register, Label),
+    Ldr(Register, Register, Immediate),
+    Lea(Register, Label),
+
+    /* More control-flow esque instructions */
+    Br(bool, bool, bool, Label),
+    BrImm(bool, bool, bool, Immediate),
+    Jmp(Register),
+    Jsr(Label),
+    Jsrr(Register),
+    
+    
+    Ret,
+    Rti, // What?
+    
+    Trap(TrapKind), // Trap vector.
+    Halt, // We should really sub-enum trap above ^^^
+    Subroutine(SubroutineKind),
 }

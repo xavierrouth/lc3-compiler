@@ -211,11 +211,6 @@ impl <'a> HIRGen<'a> {
         }
     }
 
-    /* 
-    fn emit_stack_allocation(&mut self, cfg: &mut CFG, node_h: ASTNodeHandle) -> () {
-        let = self.ast.get(node_h);
-    } */
-
     // is CFG -> CFG preferred or just &mut CFG -> (). Interesting question
     /* Builds a CFG for a function. */
     fn build_function_cfg(&mut self, node_h: TypedASTNodeHandle) -> CFG<'a> {
@@ -233,10 +228,16 @@ impl <'a> HIRGen<'a> {
         for parameter in parameters {
             cfg.add_parameter(parameter.clone());
         }
-        
-        let mut entry = cfg.entry;
+
+        let work_name = cfg.context.get_string("work");
+
+
+        let mut work: BasicBlockHandle = cfg.new_bb(work_name);
+
+        let entry = cfg.entry;
+        cfg.set_terminator(entry, Instruction::Br(work));
         // Generate 
-        self.build_function_bb(&mut cfg, &mut entry, body);
+        self.build_function_bb(&mut cfg, &mut work, body);
         cfg
 
     }

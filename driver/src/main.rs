@@ -2,7 +2,7 @@
 use std::{path::PathBuf, fs::File, io::Read};
 use analysis::{symres::SymbolResolutionPass, typecheck::{TypecheckPass}, typedast::{TypedASTPrint, TypedVistior}};
 use clap::{Parser};
-use intermediate::{hirgen::{self, HIRGen}, hir::HIR};
+use intermediate::{hirgen::{self, HIRGen}, hir::HIR, lirgen::LIRGen};
 //use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
 
@@ -105,6 +105,17 @@ fn main() {
     if cli.verbose {
         println!("====================== HIR =====================");
         hir.print();
+        println!("")
+    }
+
+    let lirgen = LIRGen::new(hir, &context);
+
+    let lir = lirgen.run();
+
+    if cli.verbose {
+        println!("====================== LIR =====================");
+        lir.print();
+        println!("")
     }
     
 

@@ -180,6 +180,11 @@ impl <'ctx> CFG<'ctx> {
         self.add_local(decl.clone(), alloca); // Add alloca and decl to the locals of the CFG.
         alloca
     }
+
+    pub fn get_inst(&self, inst_h: &InstructionHandle) -> &Instruction<'ctx> {
+        self.instruction_arena.get(*inst_h).expect("instruction handle not valid")
+    }
+
 }
 
 pub struct CFGPrintable<'ctx> {
@@ -266,6 +271,7 @@ impl <'ctx> CFGPrintable<'ctx> {
     }
 
     pub fn print_inst(&self, inst_h: &InstructionHandle) {
+        // TODO: Use cfg api for get_inst
         let inst = self.cfg.instruction_arena.get(*inst_h).expect("instruction handle not valid");
 
         let inst_name = self.get_inst_name(inst_h);
@@ -343,10 +349,10 @@ impl <'ctx> CFGPrintable<'ctx> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BasicBlock {
-    name: InternedString,
-    instructions: Vec<InstructionHandle>,
-    terminator: Option<InstructionHandle>,
-    incoming: Vec<BasicBlockHandle>
+    pub(crate) name: InternedString,
+    pub(crate) instructions: Vec<InstructionHandle>,
+    pub(crate) terminator: Option<InstructionHandle>,
+    pub(crate) incoming: Vec<BasicBlockHandle>
 }
 
 impl BasicBlock {
@@ -381,6 +387,8 @@ pub enum Instruction<'ctx> {
     Return(Operand),
     Call(Rc<RefCell<CFG<'ctx>>>), 
 }
+
+/* We really could do with a separate 'MemoryLocation' type. Oh Well! */
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Operand {
