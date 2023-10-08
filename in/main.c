@@ -15,3 +15,8 @@ int main(int b, int c) {
     a = 10;
 
 } 
+int a;
+
+int test() {
+    3 + 3;
+}

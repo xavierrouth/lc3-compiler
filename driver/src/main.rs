@@ -63,8 +63,10 @@ fn main() {
 
     let root = &ast.root.unwrap();
     if cli.verbose {
+        println!("====================== AST =====================");
         let mut printer: ASTPrint<'_> = ASTPrint::new(false, &ast, &context);
         printer.traverse(*root);
+        println!("");
     }
 
     let mut analyzer: SymbolResolutionPass<'_> = SymbolResolutionPass::new(&ast, &context, &error_handler);
@@ -90,15 +92,21 @@ fn main() {
 
 
     if cli.verbose {
+        println!("====================== Typed AST =====================");
         let mut typed_printer = TypedASTPrint::new(false, &ast, &context);
         typed_printer.traverse(ast.root.expect("invalid root"));
+        println!("");
     };
 
     let hirgen = HIRGen::new(ast, symbtab, &context, &error_handler);
 
     let hir: HIR<'_> = hirgen.run();
 
-    hir.print();
+    if cli.verbose {
+        println!("====================== HIR =====================");
+        hir.print();
+    }
+    
 
 
     /* 

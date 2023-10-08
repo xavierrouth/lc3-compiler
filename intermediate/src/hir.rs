@@ -336,7 +336,8 @@ impl <'ctx> CFGPrintable<'ctx> {
                 format!("{}", inst_name)
             }
         };
-        println!("{out}");
+        // TODO: Do indentaiton in not a scuffed way.
+        println!("   {out}");
     }
 }
 
