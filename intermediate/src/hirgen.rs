@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc, collections::HashMap};
 
-use crate::{TypedArena, hir::{HIR, CFG, BasicBlock, BasicBlockHandle, Instruction, Operand, MemoryLocation, InstructionHandle, self}};
+use crate::{TypedArena, hir::{HIR, CFG, BasicBlock, BasicBlockHandle, Instruction, Operand, InstructionHandle, self}};
 
 use analysis::{symtab::{SymbolTable, ScopeHandle, VarDecl}, typedast::{TypedAST, TypedASTNode, TypedASTNodeHandle}};
 use lex_parse::{ast::{ASTNodeHandle, AST, ASTNode, self}, error::ErrorHandler, context::Context};
@@ -35,11 +35,11 @@ impl <'a> HIRGen<'a> {
         self.hir
     }
 
-    fn emit_expression(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> InstructionHandle {
+    fn emit_expression(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> Operand {
         let node = self.ast.remove(node_h);
         match node {
             TypedASTNode::IntLiteral { value } => {
-                cfg.add_inst(basic_block_h, Instruction::Const(value))
+                value.into()
             }
             TypedASTNode::LvalueToRvalue { child, ty } => {
                 // TODO Optimization Potential: reduce LValueToRValue on SymbolRef to load form SymbolRef location.
@@ -50,10 +50,9 @@ impl <'a> HIRGen<'a> {
 
                 // How to pattern match on handles. You can't really huh!.
                 let child = self.emit_expression(cfg, basic_block_h, child);
-                let loc = MemoryLocation::Expr(child);
-                let load = Instruction::Load(loc);
+                let load = Instruction::Load(child);
                 let load = cfg.add_inst(basic_block_h, load);
-                load
+                load.into()
             }
             TypedASTNode::FunctionCall { symbol_ref, arguments, ty } => todo!(),
             TypedASTNode::SymbolRef { identifier, decl, ty } => {
@@ -62,34 +61,64 @@ impl <'a> HIRGen<'a> {
                 let ty = decl.type_info;
                 let ty = self.context.resolve_type(&ty);
           
-                let lea_inst = Instruction::Lea(loc.clone());
-                let lea_inst = cfg.add_inst(basic_block_h, lea_inst);
-                lea_inst
+                // let lea_inst = Instruction::Lea(loc.clone());
+                //let lea_inst = cfg.add_inst(basic_block_h, lea_inst);
+                (*loc).into()
             }
             TypedASTNode::FieldRef { identifier, ty } => todo!(),
             TypedASTNode::BinaryOp { op, left, right, ty } => {
                 match op {
                     ast::BinaryOpType::Assign => {
-                        let rhs = self.emit_expression(cfg, basic_block_h, right);
+                        let rhs = self.emit_expression(cfg, basic_block_h, right).into();
                         // Previously we have optimized here, but IG we will just do that later *shrug*.
-                        let lhs = self.emit_expression(cfg, basic_block_h, left);
+                        let lhs = self.emit_expression(cfg, basic_block_h, left).into();
                         // Treat LHS as a memory location.
-                        let loc = MemoryLocation::Expr(lhs);
-                        let store = cfg.add_inst(basic_block_h, Instruction::Store(loc, rhs));
+                        let store = cfg.add_inst(basic_block_h, Instruction::Store(lhs, rhs));
 
                         rhs
                     }
                     ast::BinaryOpType::ArrayAccess => {
-                        let base = self.emit_expression(cfg, basic_block_h, left);
-                        let offset = self.emit_expression(cfg, basic_block_h, right);
+                        let base = self.emit_expression(cfg, basic_block_h, left).into();
+                        let offset = self.emit_expression(cfg, basic_block_h, right).into();
                         
                         // Could previously be optimized based on lvalue and rvalue things.
-                        let inst = cfg.add_inst(basic_block_h, Instruction::Lea(MemoryLocation::Expr(base)));
-                        let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(hir::BinaryOpType::Add, inst, offset));
-                        inst
+                        //let inst = cfg.add_inst(basic_block_h, Instruction::Lea(MemoryLocation::Expr(base)));
+
+                        // Pointer math:
+                        let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(hir::BinaryOpType::Add, base, offset));
+                        inst.into()
                     }
                     _ => {
-                        todo!();
+                        let rhs = self.emit_expression(cfg, basic_block_h, right);
+                        // Previously we have optimized here, but IG we will just do that later *shrug*.
+                        let lhs = self.emit_expression(cfg, basic_block_h, left);
+
+                        let op = match op {
+                            ast::BinaryOpType::Add => hir::BinaryOpType::Add,
+                            ast::BinaryOpType::Sub => hir::BinaryOpType::Sub,
+                            ast::BinaryOpType::Mul => hir::BinaryOpType::Mul,
+                            ast::BinaryOpType::Div => hir::BinaryOpType::Div,
+                            ast::BinaryOpType::Mod => hir::BinaryOpType::Mod,
+                            ast::BinaryOpType::LogAnd |
+                            ast::BinaryOpType::BitAnd => hir::BinaryOpType::And,
+                            ast::BinaryOpType::LogOr | 
+                            ast::BinaryOpType::BitOr => hir::BinaryOpType::And,
+                            ast::BinaryOpType::LessThan => hir::BinaryOpType::LessThan,
+                            ast::BinaryOpType::GreaterThan => hir::BinaryOpType::GreaterThan,
+                            ast::BinaryOpType::LessThanEqual => hir::BinaryOpType::LessThanEqual,
+                            ast::BinaryOpType::GreaterThanEqual => hir::BinaryOpType::GreaterThanEqual,
+                            ast::BinaryOpType::NotEqual => hir::BinaryOpType::NotEqual,
+                            ast::BinaryOpType::EqualEqual => hir::BinaryOpType::EqualEqual,
+
+                            ast::BinaryOpType::LeftShift => todo!(),
+                            ast::BinaryOpType::RightShift => todo!(),
+                            ast::BinaryOpType::LeftShiftAssign => todo!(),
+                            ast::BinaryOpType::RightShiftAssign => todo!(),
+                            _ => panic!("bad op type for hir")
+                        };
+                        
+                        let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(op, lhs.into(), rhs.into()));
+                        inst.into()
                     } 
                 }
             }
@@ -105,20 +134,15 @@ impl <'a> HIRGen<'a> {
         let node = self.ast.remove(node_h);
         match node {
             // Non-Control changing statements
-            TypedASTNode::IntLiteral { value } => {
-                cfg.add_inst(*basic_block_h, Instruction::Const(value));
-            }
             TypedASTNode::VariableDecl { decl, initializer, type_info } => {
-                let size = cfg.get_const(cfg.entry, decl.size.try_into().unwrap());
-                // Parameter:
-                let alloca = cfg.add_to_entry(Instruction::Allocate(size)); // Add an alloca instruction to entry bb
-                cfg.add_local(decl.clone(), alloca); // Add alloca and decl to the locals of the CFG.
-                // Unclear if we need separate Alloca instructions.
-                // 
+                /* Add allocation to entry */
+                let alloca = cfg.add_alloca(decl.clone());
+
+                /* Add Initializer to wherever we are (might dynamically calcaulted intialization)*/
                 if let Some(initializer) = initializer {
                     let init = self.emit_expression(cfg, *basic_block_h, initializer);
                     let loc = cfg.get_location(decl.clone());
-                    cfg.add_inst(*basic_block_h, Instruction::Store(loc.clone(), init));
+                    cfg.add_inst(*basic_block_h, Instruction::Store(alloca.into(), init.into()));
                 }
                 
             }
@@ -155,8 +179,8 @@ impl <'a> HIRGen<'a> {
                         let end_name = self.context.get_string("end");
                         let end_bb = cfg.new_bb(end_name);
 
-                        let br = Instruction::CondBr(cond, if_bb, else_bb);
-                        let br = cfg.add_inst(*basic_block_h, br);
+                        let br = Instruction::CondBr(cond.into(), if_bb, else_bb);
+                        cfg.set_terminator(*basic_block_h, br);
 
                         self.build_function_bb(cfg, &mut if_bb, if_branch);
                         cfg.add_inst(if_bb, Instruction::Br(end_bb));
@@ -170,8 +194,8 @@ impl <'a> HIRGen<'a> {
                         let end_name = self.context.get_string("end");
                         let end_bb = cfg.new_bb(end_name);
 
-                        let br = Instruction::CondBr(cond, if_bb, end_bb);
-                        let br = cfg.add_inst(*basic_block_h, br);
+                        let br = Instruction::CondBr(cond.into(), if_bb, end_bb);
+                        cfg.set_terminator(*basic_block_h, br);
 
                         self.build_function_bb(cfg, &mut if_bb, if_branch);
                         cfg.add_inst(if_bb, Instruction::Br(end_bb));

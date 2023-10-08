@@ -39,10 +39,8 @@ pub enum BinaryOpType {
     Mul,
     Div,
     Mod,
-    LogAnd, // Are Log and Bit / Bin the same??
-    LogOr,
-    BitAnd,
-    BitOr,
+    And,
+    Or,
     LessThan,
     GreaterThan,
     LessThanEqual,
@@ -77,17 +75,13 @@ pub struct CFG<'ctx> {
     // Stack Frame:
     parameters_offset: usize,
     locals_offset: usize,
-    locals: HashMap<VarDecl, MemoryLocation>, 
+    locals: HashMap<VarDecl, InstructionHandle>,
     // Globals??
     // Ref to 'globals' hashmap?
 
     pub context: &'ctx Context<'ctx>,
 }
 
-#[derive(Debug, Clone)]
-struct LocalVarSlot {
-    size: i32,
-}
 
 impl PartialEq for CFG<'_> {
     fn eq(&self, other: &Self) -> bool {
@@ -125,7 +119,7 @@ impl <'ctx> CFG<'ctx> {
         h
     }
 
-    pub fn get_location(&self, local: VarDecl) -> &MemoryLocation {
+    pub fn get_location(&self, local: VarDecl) -> &InstructionHandle {
         match self.locals.get(&local) {
             Some(local) => local,
             None => panic!("variable does not belong to current function or hasn't been allocated yet.")
@@ -134,13 +128,15 @@ impl <'ctx> CFG<'ctx> {
 
     pub fn add_parameter(&mut self, parameter: VarDecl) -> () {
         let size = parameter.size;
-        self.locals.entry(parameter).or_insert(MemoryLocation::Parameter(self.parameters_offset));
+        let inst =  Instruction::Parameter;
+        let inst = self.instruction_arena.insert(inst);
+        self.locals.entry(parameter).or_insert(inst);
         self.parameters_offset += size;
     }
 
     pub fn add_local(&mut self, local: VarDecl, alloca: InstructionHandle) -> () { // Do we need scope information here? (scope: ScopeHandle)
         let size = local.size;
-        self.locals.entry(local).or_insert(MemoryLocation::Stack(alloca, self.locals_offset));
+        self.locals.entry(local).or_insert(alloca);
         self.locals_offset += size;
     }
 
@@ -152,9 +148,8 @@ impl <'ctx> CFG<'ctx> {
         self.basic_block_arena.insert(basic_block)
     }
 
-    pub fn get_const(&mut self, basic_block_h: BasicBlockHandle, value: i32) -> InstructionHandle {
-        let inst = Instruction::Const(value);
-        self.add_inst(basic_block_h, inst)
+    pub fn get_const(&mut self, basic_block_h: BasicBlockHandle, value: i32) -> Operand {
+        Operand::Const(value)
     }
 
     pub fn add_inst(&mut self, basic_block_h: BasicBlockHandle, inst: Instruction<'ctx>) -> InstructionHandle {
@@ -164,11 +159,26 @@ impl <'ctx> CFG<'ctx> {
         h
     }
 
+    pub fn set_terminator(&mut self, basic_block_h: BasicBlockHandle, inst: Instruction<'ctx>) -> () {
+        // TODO: Check that this is a valid terminator, check that a terminator doesn't already exist, update incoming of other nodes perhaps.
+        let basic_block = self.basic_block_arena.get_mut(basic_block_h).unwrap();
+        let h = self.instruction_arena.insert(inst);
+        basic_block.terminator = Some(h);
+    }
+
     pub fn add_to_entry(&mut self, inst: Instruction<'ctx>) -> InstructionHandle {
         let basic_block = self.basic_block_arena.get_mut(self.entry).unwrap();
         let h = self.instruction_arena.insert(inst);
         basic_block.instructions.push(h);
         h
+    }
+
+    pub fn add_alloca(&mut self, decl: VarDecl) -> InstructionHandle {
+        let size = self.get_const(self.entry, decl.size.try_into().unwrap());
+        // Parameter:
+        let alloca = self.add_to_entry(Instruction::Allocate(size)); // Add an alloca instruction to entry bb
+        self.add_local(decl.clone(), alloca); // Add alloca and decl to the locals of the CFG.
+        alloca
     }
 }
 
@@ -188,11 +198,24 @@ impl <'ctx> CFGPrintable<'ctx> {
 
     pub fn print(&self) {
         let return_type = TypePrintable { context: self.cfg.context, data: self.cfg.context.resolve_type(&self.cfg.return_ty) };
-        println!("fn @{}() -> {return_type}:", self.cfg.context.resolve_string(self.cfg.name));
+        
+        let mut params_str = String::new();
+    
+        for param in self.cfg.locals.keys() {
+            if param.is_parameter {
+                let p = self.cfg.locals.get(param).expect("oh no!");
+                let inst_name = self.get_inst_name(p);
+                let ty = self.cfg.context.resolve_type(&param.type_info);
+                let ty = TypePrintable { data: ty, context: self.cfg.context };
+                params_str.push_str(&format!("{ty} {} ", inst_name));
+            }
+        }
+
+        println!("fn @{}({params_str}) -> {return_type}:", self.cfg.context.resolve_string(self.cfg.name));
         // We really should maintain an ordering of basic blocks in the cfg.
         for bb in self.cfg.basic_block_arena.keys() {
             self.print_bb(bb);
-            println!("test");
+            println!("");
         }
     }
 
@@ -203,16 +226,27 @@ impl <'ctx> CFGPrintable<'ctx> {
         for inst in &bb.instructions {
             self.print_inst(inst);
         }
+        if let Some(terminator) = bb.terminator {
+            self.print_inst(&terminator);
+        }
+        
         
     }
 
-    pub fn get_inst_name(&self, inst: &InstructionHandle) -> i32 {
+    pub fn get_op_name(&self, op: &Operand) -> String {
+        match op {
+            Operand::Instruction(inst) => self.get_inst_name(&inst),
+            Operand::Const(value) => format!("{value}"),
+        }
+    }
+
+    pub fn get_inst_name(&self, inst: &InstructionHandle) -> String {
         // Does this involve a copy?
         let mut names = self.names.borrow_mut();
         let name = names.get(*inst);
         match name {
             Some(&val) => {
-                val
+                format!("%{val}")
             }
             None => {
                 // Mutable RefMut ????? 
@@ -220,7 +254,7 @@ impl <'ctx> CFGPrintable<'ctx> {
                 let tmp = ctr.clone();
                 names.insert(*inst, *ctr);
                 *ctr += 1;
-                tmp
+                format!("%{tmp}")
             }
         }
     }
@@ -237,9 +271,11 @@ impl <'ctx> CFGPrintable<'ctx> {
         let inst_name = self.get_inst_name(inst_h);
         let out = match inst {
             Instruction::Allocate(size) => {
-                format!("%{} = Allocate %{}", inst_name, self.get_inst_name(size))
+                format!("{} = allocate {}", inst_name, self.get_op_name(size))
             }
             Instruction::Load(location) => {
+                format!("{} = load {}", inst_name, self.get_op_name(location))
+                /* 
                 match location {
                     MemoryLocation::Stack(allocate_inst, ..) => {
                         format!("%{} = Load Stack %{}", inst_name, self.get_inst_name(allocate_inst))
@@ -253,48 +289,51 @@ impl <'ctx> CFGPrintable<'ctx> {
                     MemoryLocation::Expr(inst) => {
                         format!("%{} = Load Expr %{}", inst_name, self.get_inst_name(inst))
                     }
-                }
+                } */
             }
             Instruction::LoadOffset(_, _) => todo!(),
-            Instruction::Store(location, operand) => match location {
-                MemoryLocation::Stack(allocate_inst, ..) => {
-                    format!("Store Stack %{} <- %{}", self.get_inst_name(allocate_inst), self.get_inst_name(operand))
-                }
-                MemoryLocation::DataSection(string) => {
-                    format!("Store Data Section %{} <- %{}", self.cfg.context.resolve_string(*string), self.get_inst_name(operand))
-                }
-                MemoryLocation::Parameter(offset) => {
-                    format!("Store Parameter %{} <- %{}", offset, self.get_inst_name(operand))
-                }
-                MemoryLocation::Expr(inst) => {
-                    format!("%{} = Store Expr %{}", inst_name, self.get_inst_name(inst))
-                }
-            }
+            Instruction::Store(location, operand) => {
+                format!("store {} <- {}", self.get_op_name(location), self.get_op_name(operand)) 
+                /* 
+                match location {
+                    
+                    MemoryLocation::Stack(allocate_inst, ..) => {
+                        format!("Store Stack %{} <- %{}", self.get_inst_name(allocate_inst), self.get_inst_name(operand))
+                    }
+                    MemoryLocation::DataSection(string) => {
+                        format!("Store Data Section %{} <- %{}", self.cfg.context.resolve_string(*string), self.get_inst_name(operand))
+                    }
+                    MemoryLocation::Parameter(offset) => {
+                        format!("Store Parameter %{} <- %{}", offset, self.get_inst_name(operand))
+                    }
+                    MemoryLocation::Expr(inst) => {
+                        format!("store Expr %{} <- %{}", self.get_inst_name(inst), self.get_inst_name(operand))
+                    }
+                } */
+            }   
             Instruction::StoreOffset(_, _, _) => todo!(),
             // BinaryOps:
             // Does having this as a separate type make it harder to match? 
             // Probably no becasue we have to do our own custom pattern matching anyways.
             Instruction::BinaryOp(optype, op1, op2) => {
-                format!("%{} = {:?} %{} %{}", inst_name, optype, self.get_inst_name(op1), self.get_inst_name(op2))
+                format!("{} = {:?} {} {}", inst_name, optype, self.get_op_name(op1), self.get_op_name(op2))
             }
             Instruction::UnaryOp(_, _) => todo!(),
             
             // A.
-            Instruction::Const(val) => {
-                format!("%{} = {val}", inst_name)
-            }
             Instruction::Call(_) => todo!(),
-            Instruction::Lea(location) => {
-                format!("%{} = Lea {:?}", inst_name, location)
-            }
+             
             Instruction::Return(op) => {
-                format!("return %{}", self.get_inst_name(op))
+                format!("return {}", self.get_op_name(op))
             }
             Instruction::CondBr(cond, true_bb, false_bb) => {
-                format!("Br %{}, {}, {}", self.get_inst_name(cond), self.get_bb_name(true_bb), self.get_bb_name(false_bb))
+                format!("branch {}, {}, {}", self.get_op_name(cond), self.get_bb_name(true_bb), self.get_bb_name(false_bb))
             }
             Instruction::Br(bb_h) => {
-                format!("Br %{}", self.get_bb_name(bb_h))
+                format!("branch {}", self.get_bb_name(bb_h))
+            }
+            Instruction::Parameter => {
+                format!("{}", inst_name)
             }
         };
         println!("{out}");
@@ -305,7 +344,7 @@ impl <'ctx> CFGPrintable<'ctx> {
 pub struct BasicBlock {
     name: InternedString,
     instructions: Vec<InstructionHandle>,
-    terminator: Option<Terminator>,
+    terminator: Option<InstructionHandle>,
     incoming: Vec<BasicBlockHandle>
 }
 
@@ -318,17 +357,18 @@ impl BasicBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction<'ctx> {
     Allocate(Operand), // How to make this one const, and the other one non-const?
-    Lea(MemoryLocation), // This really doesn't belong here, but oh well!. 
+    Parameter,
+    //Lea(MemoryLocation), // This really doesn't belong here, but oh well!. 
 
     // Need some way to describe complex memory locations with an expression? 
     // Basically dumb things like *(&b + 10) = 4;
     // This should compile but we need to described *(&b + 10) as a 'memory location'
 
-    Load(MemoryLocation),
-    LoadOffset(MemoryLocation, Operand),
+    Load(Operand),
+    LoadOffset(Operand, Operand),
 
-    Store(MemoryLocation, Operand),
-    StoreOffset(Operand, MemoryLocation, Operand),
+    Store(Operand, Operand),
+    StoreOffset(Operand, Operand, Operand),
 
     BinaryOp(BinaryOpType, Operand, Operand), // Include Comparisons.
     UnaryOp(UnaryOpType, Operand),
@@ -338,28 +378,26 @@ pub enum Instruction<'ctx> {
     
     // Subroutine(Instruction, Instruction),
     Return(Operand),
-    Const(i32),
     Call(Rc<RefCell<CFG<'ctx>>>), 
 }
 
-pub type Operand = InstructionHandle;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum MemoryLocation {
-    Stack(InstructionHandle, usize), // Store allocate instructon. Allocate instruction and size.
-    Parameter(usize),
-    Expr(InstructionHandle), // This is so annoying! 
-    // This makes no sense.
-    //GlobalOffset(i32),
-    
-    DataSection(InternedString),
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Operand {
+    Instruction(InstructionHandle),
+    Const(i32),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Terminator {
-    Jump(BasicBlockHandle),
-    CondJump(InstructionHandle, BasicBlockHandle, BasicBlockHandle),
-    Return(InstructionHandle),
-    // Call() TODO
+impl From<InstructionHandle> for Operand {
+    fn from(value: InstructionHandle) -> Self {
+        Operand::Instruction(value)
+    }
 }
+
+impl From<i32> for Operand {
+    fn from(value: i32 ) -> Self {
+        Operand::Const(value)
+    }
+}
+
+
 
