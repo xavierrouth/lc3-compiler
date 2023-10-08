@@ -29,6 +29,11 @@ pub enum BinaryOpType {
     EqualEqual,
     Assign,
 
+    LeftShift,
+    RightShift,
+    LeftShiftAssign,
+    RightShiftAssign,
+
     ArrayAccess,
     DotAccess,
     PointerAccess,
@@ -130,7 +135,6 @@ pub enum ASTNode {
     },
     SymbolRef {
         identifier: InternedString,
-        //type_info: TypeInfo<'a>,
     },
     FieldRef {
         identifier: InternedString,
@@ -256,13 +260,7 @@ impl Display for ASTNodePrintable<'_> {
             ASTNode::FieldDecl { identifier, type_info } => {
                 write!(f, "<FieldDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(*type_info), context: self.context})
             }
-            /*
-            ASTNode::ImplicitCast { child, cast } => {
-                match cast {
-                    CastType::ArrayPointerDecay => write!(f, "<ImplicitCast> \"ArrayToPointerDecay\""),
-                    CastType::LvalueToRvalue => write!(f, "<ImplicitCast> \"LValueToRValue\""),
-                }
-            },  */
+
         }
     }
 }
@@ -330,13 +328,6 @@ pub trait Vistior<'a> {
                 self.traverse(&condition);
                 self.traverse(&body);
             }
-            // Terminal Nodes
-            ASTNode::InlineAsm { assembly: _ } => {}
-            ASTNode::ParameterDecl { identifier: _, type_info: _ } => {}
-            ASTNode::IntLiteral { value: _  } => {}
-            ASTNode::SymbolRef { identifier: _} => {}
-            ASTNode::FieldDecl { identifier: _, type_info: _ } => {}
-            ASTNode::FieldRef { identifier: _} => {}
 
             ASTNode::Program { declarations } => {
                 for decl in declarations.iter() {
@@ -361,6 +352,13 @@ pub trait Vistior<'a> {
                     self.traverse(field);
                 }
             }
+            // Terminal Nodes
+            ASTNode::InlineAsm { assembly: _ } => {}
+            ASTNode::ParameterDecl { identifier: _, type_info: _ } => {}
+            ASTNode::IntLiteral { value: _  } => {}
+            ASTNode::SymbolRef { identifier: _} => {}
+            ASTNode::FieldDecl { identifier: _, type_info: _ } => {}
+            ASTNode::FieldRef { identifier: _} => {}
             
         }
 

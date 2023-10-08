@@ -113,6 +113,7 @@ pub enum LC3Inst {
     AndReg(Register, Register, Register),
     AndImm(Register, Register, Immediate),
     Br(bool, bool, bool, Label),
+    BrImm(bool, bool, bool, Immediate),
     Jmp(Register),
     Jsr(Label),
     Jsrr(Register),
@@ -213,6 +214,18 @@ impl fmt::Display for LC3Inst {
                     (false, true, true) => write!(f,  "BRzp {label}"),
                     (false, true, false) => write!(f, "BRz  {label}"),
                     (false, false, true) => write!(f, "BRp  {label}"),
+                    (false, false, false) => write!(f, "; bad BR opcode"),
+                }
+            }
+            LC3Inst::BrImm(n, z, p, imm) => {
+                match (n, z, p) {
+                    (true, true, true) => write!(f,   "BR   {imm}"), // Same as BR
+                    (true, true, false) => write!(f,  "BRnz {imm}"),
+                    (true, false, true) => write!(f,  "BRnp {imm}"),
+                    (true, false, false) => write!(f, "BRn  {imm}"),
+                    (false, true, true) => write!(f,  "BRzp {imm}"),
+                    (false, true, false) => write!(f, "BRz  {imm}"),
+                    (false, false, true) => write!(f, "BRp  {imm}"),
                     (false, false, false) => write!(f, "; bad BR opcode"),
                 }
             }
