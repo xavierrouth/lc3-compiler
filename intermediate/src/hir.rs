@@ -9,16 +9,15 @@ use analysis::{symtab::{VarDecl}};
 use lex_parse::{ast::{ASTNodeHandle, AST}, error::ErrorHandler, context::{InternedString, Context, InternedType}, types::TypePrintable};
 use slotmap::{SparseSecondaryMap, SlotMap, SecondaryMap};
 
-// TODO: Should be consistent in naming of type data vs type handle. Which one gets the original name, which one gets the suffix?
-
+/* These are copy */
 slotmap::new_key_type! { pub struct InstructionHandle; }
 slotmap::new_key_type! { pub struct BasicBlockHandle; }
 
 /* High level IR, generated from AST, moved to SSA form, DCE,  */
 pub struct HIR<'ctx> {
-    pub main: Option<i32>,
+    pub main: Option<i32>, // Wtf is main? 
     pub functions: Vec<Rc<RefCell<CFG<'ctx>>>>,
-    pub data: Vec<VarDecl>,
+    pub data: Vec<VarDecl>, /* Data seciton. */
     pub context: &'ctx Context<'ctx>,
 }
 
@@ -32,56 +31,52 @@ impl <'ctx> HIR<'ctx> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum BinaryOpType {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    And,
-    Or,
-    LessThan,
-    GreaterThan,
-    LessThanEqual,
-    GreaterThanEqual,
-    NotEqual,
-    EqualEqual,
-
-    LeftShift,
-    RightShift,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum UnaryOpType {
-    Negate,
-    LogNot,
-    BinNot, 
-}
 
 /* =============== Control FLow Graph ============ */
-/* CFG for a single function */
+/* CFG for a single function, */
 #[derive(Debug, Clone)]
 pub struct CFG<'ctx> {
-    pub(crate) entry: BasicBlockHandle,
+    pub(crate) entry: BasicBlockHandle, /* Entry basic block */
     pub(crate) name: InternedString,
+
+    /* Local allocation arenas for instructions and basic blocks of the CFG */
     pub(crate) instruction_arena: SlotMap<InstructionHandle, Instruction<'ctx>>,
     pub(crate) basic_block_arena: SlotMap<BasicBlockHandle, BasicBlock>,
 
+    /* Order of the basic blocks in the function, \
+     this shouldn't be stored, we should dynamically generate an order via a (reverse postorder traversal) from entry to exit BB. 
+     this will also make BBs available for fall-through optimizations? */
     pub basic_block_order: Vec<BasicBlockHandle>,
 
+    /* The return type of this function */
     return_ty: InternedType, 
 
-    // Stack Frame:
-    parameters_offset: usize,
-    locals_offset: usize,
-    locals: HashMap<VarDecl, InstructionHandle>,
+    /* Stack Frame */
+    pub(crate) stack_frame: StackFrame,
+
     // Globals??
     // Ref to 'globals' hashmap?
 
+    /* Compiler Context */
     pub context: &'ctx Context<'ctx>,
 }
 
+
+struct FrameSlot (usize);
+struct StackFrame {
+    locals: HashMap<VarDecl, InstructionHandle>,
+    // Vec<>,    
+
+    /* Old:: */
+    parameters_offset: usize,
+    locals_offset: usize,
+}
+
+impl StackFrame {
+    fn new() -> StackFrame {
+
+    }
+}
 
 impl PartialEq for CFG<'_> {
     fn eq(&self, other: &Self) -> bool {
@@ -94,9 +89,13 @@ impl <'ctx> CFG<'ctx> {
     pub fn new(name: InternedString, return_ty: InternedType, context: &'ctx Context<'ctx>,) -> CFG<'ctx> {
         let mut basic_block_arena = SlotMap::with_key();
         let mut basic_block_order = Vec::new();
+
         let entry_name = context.get_string("entry");
-        let entry = basic_block_arena.insert(BasicBlock { name: entry_name, instructions: Vec::new(), terminator: None, incoming: Vec::new() });
+        let entry = basic_block_arena.insert(BasicBlock
+             { name: entry_name, instructions: Vec::new(), terminator: None, incoming: Vec::new() });
+
         basic_block_order.push(entry);
+
         CFG {
             context,
             return_ty,
@@ -105,12 +104,11 @@ impl <'ctx> CFG<'ctx> {
             basic_block_order,
             name,
             entry,
-            parameters_offset: 0,
-            locals_offset: 0,
-            locals: HashMap::new(),
+            stack_frame: StackFrame::new(),
         }
     }
 
+    /* Add a new bb  */
     pub fn new_bb(&mut self, name: InternedString) -> BasicBlockHandle {
         let bb = BasicBlock { name, instructions: Vec::new(), terminator: None, incoming: Vec::new() };
         
@@ -120,12 +118,13 @@ impl <'ctx> CFG<'ctx> {
     }
 
     pub fn get_location(&self, local: VarDecl) -> &InstructionHandle {
-        match self.locals.get(&local) {
+        match self.stack_frame.locals.get(&local) {
             Some(local) => local,
             None => panic!("variable does not belong to current function or hasn't been allocated yet.")
         }
     }
 
+    /* Move to stack frame */
     pub fn add_parameter(&mut self, parameter: VarDecl) -> () {
         let size = parameter.size;
         let inst =  Instruction::Parameter;
@@ -173,6 +172,7 @@ impl <'ctx> CFG<'ctx> {
         h
     }
 
+    /* Add this to stack frame bro */
     pub fn add_alloca(&mut self, decl: VarDecl) -> InstructionHandle {
         let size = self.get_const(self.entry, decl.size.try_into().unwrap());
         // Parameter:
@@ -207,6 +207,14 @@ impl <'ctx> CFGPrintable<'ctx> {
         let mut params_str = String::new();
     
         for param in self.cfg.locals.keys() {
+            match param {
+                VarDecl<Parameter> => {
+
+                },
+                VarDecl<_> => {
+
+                }
+            }
             if param.is_parameter {
                 let p = self.cfg.locals.get(param).expect("oh no!");
                 let inst_name = self.get_inst_name(p);
@@ -245,6 +253,16 @@ impl <'ctx> CFGPrintable<'ctx> {
         }
     }
 
+    pub fn get_loc_name(&self, loc: &MemoryLocation) -> String {
+        match loc {
+            MemoryLocation::Stack(_, _) => todo!(),
+            MemoryLocation::Parameters(_, _) => todo!(),
+            MemoryLocation::Data(_) => todo!(),
+            MemoryLocation::Label(_) => todo!(),
+            MemoryLocation::Cast(op) => format!("cast {}", self.get_op_name(op))
+        }
+    }
+
     pub fn get_inst_name(&self, inst: &InstructionHandle) -> String {
         // Does this involve a copy?
         let mut names = self.names.borrow_mut();
@@ -276,11 +294,8 @@ impl <'ctx> CFGPrintable<'ctx> {
 
         let inst_name = self.get_inst_name(inst_h);
         let out = match inst {
-            Instruction::Allocate(size) => {
-                format!("{} = allocate {}", inst_name, self.get_op_name(size))
-            }
             Instruction::Load(location) => {
-                format!("{} = load {}", inst_name, self.get_op_name(location))
+                format!("{} = load {}", inst_name, self.get_loc_name(location))
                 /* 
                 match location {
                     MemoryLocation::Stack(allocate_inst, ..) => {
@@ -297,9 +312,8 @@ impl <'ctx> CFGPrintable<'ctx> {
                     }
                 } */
             }
-            Instruction::LoadOffset(_, _) => todo!(),
             Instruction::Store(location, operand) => {
-                format!("store {} <- {}", self.get_op_name(location), self.get_op_name(operand)) 
+                format!("store {} <- {}", self.get_op_name(location), self.get_loc_name(operand.into())) 
                 /* 
                 match location {
                     
@@ -317,7 +331,6 @@ impl <'ctx> CFGPrintable<'ctx> {
                     }
                 } */
             }   
-            Instruction::StoreOffset(_, _, _) => todo!(),
             // BinaryOps:
             // Does having this as a separate type make it harder to match? 
             // Probably no becasue we have to do our own custom pattern matching anyways.
@@ -338,15 +351,15 @@ impl <'ctx> CFGPrintable<'ctx> {
             Instruction::Br(bb_h) => {
                 format!("branch {}", self.get_bb_name(bb_h))
             }
-            Instruction::Parameter => {
-                format!("{}", inst_name)
-            }
+            Instruction::Lea(_) => todo!(),
         };
         // TODO: Do indentaiton in not a scuffed way.
         println!("   {out}");
     }
 }
 
+/* =============== Basic Block ============ */
+/* BB, */
 #[derive(Debug, Clone, PartialEq)]
 pub struct BasicBlock {
     pub(crate) name: InternedString,
@@ -361,21 +374,58 @@ impl BasicBlock {
     }
 }
 
+
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BinaryOpType {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    And,
+    Or,
+    LessThan,
+    GreaterThan,
+    LessThanEqual,
+    GreaterThanEqual,
+    NotEqual,
+    EqualEqual,
+
+    LeftShift,
+    RightShift,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnaryOpType {
+    Negate,
+    LogNot,
+    BinNot, 
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemoryLocation {
+    Stack (u32, u32), // Size, offset 
+    Parameters (u32, u32), // 
+    Data (u32),
+    Label (u32),
+    Cast (Operand) /* Cast an arbitrary expression to a memory location */
+}
+
+/* =============== Instruction ============ */
+/* BB, */
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction<'ctx> {
-    Allocate(Operand), // How to make this one const, and the other one non-const?
-    Parameter,
-    //Lea(MemoryLocation), // This really doesn't belong here, but oh well!. 
+    /* Cast a memory location to a value */
+    Lea(MemoryLocation), 
 
-    // Need some way to describe complex memory locations with an expression? 
+    // Need some way to describe complex / runtime variable memory locations with an expression? 
     // Basically dumb things like *(&b + 10) = 4;
     // This should compile but we need to described *(&b + 10) as a 'memory location'
-
-    Load(Operand),
-    LoadOffset(Operand, Operand),
-
-    Store(Operand, Operand),
-    StoreOffset(Operand, Operand, Operand),
+    Load(MemoryLocation),
+    Store(Operand, MemoryLocation), // Typed References but all in the same arena? Lets see what Happens
 
     BinaryOp(BinaryOpType, Operand, Operand), // Include Comparisons.
     UnaryOp(UnaryOpType, Operand),
@@ -383,12 +433,9 @@ pub enum Instruction<'ctx> {
     CondBr(Operand, BasicBlockHandle, BasicBlockHandle), // Condition, true, false,
     Br(BasicBlockHandle),
     
-    // Subroutine(Instruction, Instruction),
     Return(Operand),
     Call(Rc<RefCell<CFG<'ctx>>>), 
 }
-
-/* We really could do with a separate 'MemoryLocation' type. Oh Well! */
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Operand {

@@ -1,16 +1,17 @@
 use core::fmt;
 use std::cell::RefCell;
+use std::marker;
 use std::ops::Deref;
 use std::rc::Rc;
 
 use slotmap::{SparseSecondaryMap, SecondaryMap};
 
-use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, ASTNodePrintable, BinaryOpType};
+use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, WithContext, BinaryOpType};
 use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{InternedString, InternedType, Context, self};
 use lex_parse::types::{Type, DeclaratorPart, BaseType};
 
-use crate::symtab::{SymbolTable, Scope, VarDecl, RecordDecl, FunctionDecl, FieldDecl, ScopeHandle, self};
+use crate::symtab::{SymbolTable, Scope, VarDecl, RecordDecl, FunctionDecl, FieldDecl, ScopeHandle};
 
 
 // TODO: 
@@ -28,7 +29,7 @@ pub struct SymbolResolutionPass<'ctx> {
 
     curr_scope: ScopeHandle,
 
-    // This is kinda disgusting, but neceesary
+    // Map nodes to the scope that they are in. 
     pub scopes: SparseSecondaryMap<ASTNodeHandle, ScopeHandle>,
 
     halt: bool,

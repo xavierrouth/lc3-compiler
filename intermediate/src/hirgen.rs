@@ -18,25 +18,40 @@ pub struct HIRGen<'a> {
 
 
 impl <'a> HIRGen<'a> {
+    /* 
+     * Initialize a HIRGen context / builder to build an HIR. 
+     */
     pub fn new(ast: TypedAST, symbol_table: SymbolTable, context: &'a Context<'a>, 
         error_handler: &'a ErrorHandler<'a>) -> HIRGen<'a> {
             HIRGen { symbol_table , ast , context, hir: HIR { main: None, functions: Vec::new(), data: Vec::new(), context } }
     }
-
+    
+    /* 
+     * Generate HIR from a TypedAST 
+     */
     pub fn run(mut self) -> HIR<'a> {
         let root = self.ast.root.expect("invalid root");
         let root = self.ast.remove(root);
-        let TypedASTNode::Program { functions, globals } = root else {panic!("root is not of type 'program'")};
+
+        /* In general I don't like having to do union dispatch on these things, we should know the type that these are, but this saves me from writing
+           the boilerplate. */
+        
+        let TypedASTNode::Program { 
+            functions, 
+            globals } 
+        = root else {panic!("root is not of type 'program'")};
 
         for function in functions {
-            let cfg = self.build_function_cfg(function);
+            let cfg: CFG<'_> = self.build_function_cfg(function);
             self.hir.functions.push(Rc::new(RefCell::new(cfg)));
         }
+
         self.hir
     }
 
+    /* Lower an expression */
     fn emit_expression(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> Operand {
-        let node = self.ast.remove(node_h);
+        let node = self.ast.remove(node_h); /* Consume the node */
         match node {
             TypedASTNode::IntLiteral { value } => {
                 value.into()
@@ -49,6 +64,8 @@ impl <'a> HIRGen<'a> {
                 // Wow, seems like these could all be handled by similar code?
 
                 // How to pattern match on handles. You can't really huh!.
+                // JK you can, need to use match guards with an if condition on unwrapping the child handles and checking their type. 
+                // matches!() for variants, not std::mem::discriminant.
                 let child = self.emit_expression(cfg, basic_block_h, child);
                 let load = Instruction::Load(child);
                 let load = cfg.add_inst(basic_block_h, load);
@@ -130,7 +147,10 @@ impl <'a> HIRGen<'a> {
     }
 
     // By nature of using arenas and handles, all references are mutable, should there be separate types?
-    fn build_function_bb(&mut self, cfg: &mut CFG<'a>, basic_block_h: &mut BasicBlockHandle, node_h: TypedASTNodeHandle) -> () {
+    /* 
+
+     */
+    fn build_function_bb(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> basic_block_h {
         let node = self.ast.remove(node_h);
         match node {
             // Non-Control changing statements
@@ -140,16 +160,16 @@ impl <'a> HIRGen<'a> {
 
                 /* Add Initializer to wherever we are (might dynamically calcaulted intialization)*/
                 if let Some(initializer) = initializer {
-                    let init = self.emit_expression(cfg, *basic_block_h, initializer);
+                    let init = self.emit_expression(cfg, basic_block_h, initializer);
                     let loc = cfg.get_location(decl.clone());
-                    cfg.add_inst(*basic_block_h, Instruction::Store(alloca.into(), init.into()));
+                    cfg.add_inst(basic_block_h, Instruction::Store(alloca.into(), init.into()));
                 }
                 
             }
             TypedASTNode::DeclStmt { declarations } => todo!(),
             TypedASTNode::InlineAsm { assembly } => todo!(),
             TypedASTNode::ExpressionStmt { expression } => {
-                self.emit_expression(cfg, *basic_block_h, expression);
+                self.emit_expression(cfg, basic_block_h, expression);
             },
             TypedASTNode::CompoundStmt { statements } => {
                 for stmt in statements {
@@ -158,14 +178,15 @@ impl <'a> HIRGen<'a> {
             }
             // Control changing statements
             TypedASTNode::ReturnStmt { expression } => {
-                // TODO: Do we want basic blocks for function teardown and function setup?
+                // Do we want basic blocks for function teardown and function setup?
+                // No, this will happen in LIR. 
             }
             TypedASTNode::ForStmt { initializer, condition, update, body } => todo!(),
             TypedASTNode::WhileStmt { condition, body } => todo!(),
             TypedASTNode::IfStmt { condition, if_branch, else_branch } => {
                 // Don't worry about fall through optimizations for now.
 
-                let cond = self.emit_expression(cfg, *basic_block_h, condition);
+                let cond = self.emit_expression(cfg, basic_block_h, condition);
 
                 let if_name = self.context.get_string("if.branch");
                 let mut if_bb: BasicBlockHandle = cfg.new_bb(if_name);
@@ -180,12 +201,12 @@ impl <'a> HIRGen<'a> {
                         let end_bb = cfg.new_bb(end_name);
 
                         let br = Instruction::CondBr(cond.into(), if_bb, else_bb);
-                        cfg.set_terminator(*basic_block_h, br);
+                        cfg.set_terminator(basic_block_h, br);
 
-                        self.build_function_bb(cfg, &mut if_bb, if_branch);
+                        self.build_function_bb(cfg, if_bb, if_branch);
                         cfg.add_inst(if_bb, Instruction::Br(end_bb));
 
-                        self.build_function_bb(cfg, &mut else_bb, else_branch);
+                        self.build_function_bb(cfg, else_bb, else_branch);
                         cfg.add_inst(else_bb, Instruction::Br(end_bb));
 
                         *basic_block_h = end_bb;
@@ -224,7 +245,7 @@ impl <'a> HIRGen<'a> {
         //let func_name = self.context.resolve_string(*func_name);
         let mut cfg = CFG::new(name, return_type, self.context);
 
-        // Take ownership of params from symbol table probably. We don't want symbol table anymore in HIR.
+        // TODO: Take ownership of params from symbol table probably. We don't want symbol table anymore in HIR.
         for parameter in parameters {
             cfg.add_parameter(parameter.clone());
         }

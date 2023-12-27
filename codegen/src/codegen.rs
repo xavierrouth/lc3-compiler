@@ -1,9 +1,8 @@
 use std::fmt::format;
 use slotmap::{SparseSecondaryMap};
 
-use ::analysis::{symbol_table::{SymbolTable, DeclRef}, typecheck::TypeCast};
-use lex_parse::{ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType, ASTNodePrintable}, types::StorageQual};
-use analysis::{analysis};
+use ::analysis::{symtab::{SymbolTable}};
+use lex_parse::{ast::{AST, ASTNodeHandle, ASTNode, BinaryOpType, UnaryOpType, WithContext}, types::StorageQual};
 use crate::asmprinter::{AsmPrinter, Register, LC3Bundle, LC3Bundle::*, LC3Inst, Immediate as Imm, Label, LC3Directive};
 use lex_parse::context::{Context, InternedType, InternedString};
 

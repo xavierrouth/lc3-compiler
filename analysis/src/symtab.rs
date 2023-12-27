@@ -20,7 +20,6 @@ pub struct FunctionDecl {
     pub parameters_ty: Vec<InternedType>,
     //TODO: info about parameters for type checking.
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VarDecl {
     pub scope: ScopeHandle,

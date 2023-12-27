@@ -104,6 +104,12 @@ impl <'a> AST {
 }
 
 
+/* Why?  */
+pub struct WithContext<'a, T> {
+    data: T,
+    ctx: &'a Context<'a>,
+}   
+
 // Todo: Split into different lifetimes, one for nodes one for token references.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode {
@@ -197,35 +203,34 @@ pub enum ASTNode {
     
     InlineAsm {
         assembly: InternedString,
-    }
+    },
 }
 
-pub struct ASTNodePrintable<'a> {
-    pub node: ASTNode,
-    pub context: &'a Context<'a>
-}
+impl Display for WithContext<'_, ASTNode> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt ::Result {
 
-impl Display for ASTNodePrintable<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.node {
+        let node = &self.data;
+        match node {
             ASTNode::BinaryOp { op, right: _, left: _ } => {
                 write!(f, "<BinaryOp, op: {:?}>", op)
-            }
+            },
             ASTNode::CompoundStmt { statements: _, new_scope: _ } => {
                 write!(f, "<CompoundStmt>")
-            }
+            },
             ASTNode::Program { declarations: _ } => {
                 write!(f, "<Program>")
             },
             ASTNode::FunctionDecl { body: _, parameters: _, identifier, return_type: _ } => {
-                write!(f, "<FunctionDecl, {}>", self.context.resolve_string(*identifier))
+                write!(f, "<FunctionDecl, {}>", self.ctx.resolve_string(*identifier))
             },
             // TODO: Find some way to pritn type info
             ASTNode::ParameterDecl { identifier, type_info: _ } => {
-                write!(f, "<ParameterDecl, {}>", self.context.resolve_string(*identifier))
+                write!(f, "<ParameterDecl, {}>", self.ctx.resolve_string(*identifier))
             }
             ASTNode::VariableDecl { identifier, initializer: _, type_info: type_info } => {
-                write!(f, "<VariableDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(type_info), context: self.context}
+                write!(f, 
+                    "<VariableDecl, {}, {}>", self.ctx.resolve_string(*identifier), 
+                    TypePrintable{data: self.ctx.resolve_type(type_info), context: self.ctx}
                 )
             },
             ASTNode::IntLiteral { value } => {
@@ -235,10 +240,10 @@ impl Display for ASTNodePrintable<'_> {
                 write!(f, "<FunctionCall>")
             },
             ASTNode::SymbolRef { identifier } => {
-                write!(f, "<SymbolRef, {}>", self.context.resolve_string(*identifier))
+                write!(f, "<SymbolRef, {}>", self.ctx.resolve_string(*identifier))
             },
             ASTNode::FieldRef { identifier } => {
-                write!(f, "<FieldRef, {}>", self.context.resolve_string(*identifier))
+                write!(f, "<FieldRef, {}>", self.ctx.resolve_string(*identifier))
             },
             ASTNode::UnaryOp { op, child: _, order } => {
                 write!(f, "<UnaryOp, op: {:?}, preorder: {:?}>", op, order)
@@ -266,10 +271,12 @@ impl Display for ASTNodePrintable<'_> {
             },
             ASTNode::InlineAsm { assembly: _ } => todo!(),
             ASTNode::RecordDecl { identifier, record_type, fields } => {
-                write!(f, "<RecordDecl, {record_type}, {}>", self.context.resolve_string(*identifier))
+                write!(f, "<RecordDecl, {record_type}, {}>", self.ctx.resolve_string(*identifier))
             }
             ASTNode::FieldDecl { identifier, type_info } => {
-                write!(f, "<FieldDecl, {}, {}>", self.context.resolve_string(*identifier), TypePrintable{data: self.context.resolve_type(type_info), context: self.context})
+                write!(f, 
+                    "<FieldDecl, {}, {}>", self.ctx.resolve_string(*identifier), 
+                    TypePrintable{data: self.ctx.resolve_type(type_info), context: self.ctx})
             }
             ASTNode::BreakStmt => {
                 write!(f, "<BreakStmt>")
@@ -443,7 +450,7 @@ impl <'a> Vistior<'a> for ASTPrint<'a> {
             println!("{whitespace_string}{:?}", node)
         }
         else {
-            let printable = ASTNodePrintable{ node: node.clone(), context: self.context};
+            let printable = WithContext {data: node.clone(), ctx: self.context};
             println!("{whitespace_string}{:}", printable);
         }
     }

@@ -8,7 +8,7 @@ use std::ops::Deref;
 use lex_parse::types::{Type, TypePrintable};
 use lex_parse::context::{InternedString, Context, InternedType};
 
-use crate::symtab::VarDecl;
+use crate::symtab::{VarDecl};
 
 // Need to maintain some maps, first is debug info, which maps ASTNodes to tokens.
 slotmap::new_key_type! { pub struct TypedASTNodeHandle; }

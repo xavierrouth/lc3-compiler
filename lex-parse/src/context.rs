@@ -23,6 +23,7 @@ impl <'ctx> Context <'ctx>{
         Context { src, strings: StringInterner::new().into(), tokens: SecondaryMap::new().into(), types: TypeInterner::new().into()}
     }
 
+    /* Fixme this should just be an &str */
     pub fn resolve_string(& self, string: InternedString) -> String {
         self.strings.borrow().resolve(string).unwrap().to_string()
     }
@@ -54,7 +55,7 @@ impl <'ctx> Context <'ctx>{
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
 pub struct InternedType {
-    value: usize,
+    value: u16,
 }
 
 impl Deref for InternedType {
@@ -81,7 +82,7 @@ impl TypeInterner {
             *handle
         }
         else {
-            let handle: InternedType = InternedType {value: self.map.len()};
+            let handle: InternedType = InternedType {value: self.map.len() as u16 }; /* This is unsafe no? */
             self.map.insert(r#type.to_owned(), handle);
             self.buff.push(r#type.to_owned());
 

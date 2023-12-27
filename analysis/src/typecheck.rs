@@ -1,10 +1,10 @@
 use core::{fmt, panic};
 use std::fmt::Display;
-
+use std::marker::PhantomData;
 
 use slotmap::{SparseSecondaryMap, SecondaryMap, SlotMap};
 
-use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, BinaryOpType, ASTNodePrintable, UnaryOpType};
+use lex_parse::ast::{Vistior, AST, ASTNode, ASTNodeHandle, BinaryOpType, WithContext, UnaryOpType};
 use lex_parse::error::{ErrorHandler, AnalysisError}; // Messed up
 use lex_parse::context::{Context, InternedType, InternedString};
 use lex_parse::types::{Type, DeclaratorPart, TypeSpecifier, StorageQual, Qualifiers, BaseType, TypePrintable};
@@ -98,7 +98,7 @@ impl <'a> TypecheckPass<'a> {
     }
 
     fn check_function(&mut self, body: ASTNodeHandle, parameters: Vec<ASTNodeHandle>, identifier: InternedString, return_type: InternedType) -> TypedASTNodeHandle {
-        let mut typed_parameters: Vec<VarDecl> = Vec::new();
+        let mut typed_parameters = Vec::new();
 
         for param_h in parameters {
             let param = self.ast.remove(param_h);
@@ -108,6 +108,8 @@ impl <'a> TypecheckPass<'a> {
             // Extract the type information from the symbol table.
             let scope = self.scopes.get(param_h).expect("invalid node to scope mapping");
             let decl = self.symbol_table.search_scope(scope, &identifier).expect("can't find decl");
+
+            // How do i do this type safely? 
             typed_parameters.push(decl.clone());
         }
 
