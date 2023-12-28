@@ -168,7 +168,7 @@ impl <'a> LIRGen<'a> {
                     }
                     hir::BinaryOpType::Sub => {
                         let lhs = self.add_inst(Inst::Add(lhs, (-1).into())); // This is awesome that this works, howeve rcan't we just spam .into() automatically? 
-                        // ^^^ Why do i have to call it. I hope it doesn't actually compile to anything
+                        // ^^^ Why do i have to call into. I hope it doesn't actually compile to anything
                         let lhs: Register = self.add_inst(Inst::Not(lhs.into())).into();
                         // Just kidding, this is a mess! wtf.
                         let res = self.add_inst(Inst::Add(lhs.into(), rhs));

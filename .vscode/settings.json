@@ -4,6 +4,7 @@
         "./codegen/Cargo.toml",
         "./analysis/Cargo.toml",
         "./intermediate/Cargo.toml",
+        "./intermediate/Cargo.toml"
     ],
     "terminal.integrated.env.linux": {
         "PATH" : "${env:PATH}:${workspaceFolder}/target/release"

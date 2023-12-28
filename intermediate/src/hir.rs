@@ -1,18 +1,21 @@
 
 
 
+
 use std::{cell::{RefCell, Cell}, rc::Rc, fmt::{Display, write}, alloc::Layout, collections::HashMap};
 
 use crate::TypedArena;
 
-use analysis::{symtab::{VarDecl}};
-use lex_parse::{ast::{ASTNodeHandle, AST}, error::ErrorHandler, context::{InternedString, Context, InternedType}, types::TypePrintable};
-use slotmap::{SparseSecondaryMap, SlotMap, SecondaryMap};
+
 
 /* These are copy */
 slotmap::new_key_type! { pub struct InstructionHandle; }
 slotmap::new_key_type! { pub struct BasicBlockHandle; }
 
+use analysis::{symtab::{VarDecl}};
+
+use lex_parse::{ast::{ASTNodeHandle, AST}, error::ErrorHandler, context::{InternedString, Context, InternedType}, types::TypePrintable};
+use slotmap::{SparseSecondaryMap, SlotMap, SecondaryMap};
 /* High level IR, generated from AST, moved to SSA form, DCE,  */
 pub struct HIR<'ctx> {
     pub main: Option<i32>, // Wtf is main? 
@@ -31,6 +34,24 @@ impl <'ctx> HIR<'ctx> {
     }
 }
 
+/* ======== Stack Frame ============ */
+
+#[derive(Debug, Clone)]
+struct StackFrame {
+    locals: HashMap<VarDecl, MemoryLocation>,
+    parameters_offset: usize,
+    locals_offset: usize,
+}
+
+impl StackFrame {
+    fn new() -> StackFrame {
+        StackFrame {
+            locals: HashMap::new(),
+            parameters_offset: 0,
+            locals_offset: 0,
+        }
+    }
+}
 
 /* =============== Control FLow Graph ============ */
 /* CFG for a single function, */
@@ -61,22 +82,6 @@ pub struct CFG<'ctx> {
     pub context: &'ctx Context<'ctx>,
 }
 
-
-struct FrameSlot (usize);
-struct StackFrame {
-    locals: HashMap<VarDecl, InstructionHandle>,
-    // Vec<>,    
-
-    /* Old:: */
-    parameters_offset: usize,
-    locals_offset: usize,
-}
-
-impl StackFrame {
-    fn new() -> StackFrame {
-
-    }
-}
 
 impl PartialEq for CFG<'_> {
     fn eq(&self, other: &Self) -> bool {
@@ -117,27 +122,33 @@ impl <'ctx> CFG<'ctx> {
         h
     }
 
-    pub fn get_location(&self, local: VarDecl) -> &InstructionHandle {
+    /* Get the memory location of a variable declaration */
+    pub fn get_location(&self, local: VarDecl) -> MemoryLocation {
         match self.stack_frame.locals.get(&local) {
-            Some(local) => local,
+            Some(local) => local.clone(),
             None => panic!("variable does not belong to current function or hasn't been allocated yet.")
         }
     }
 
     /* Move to stack frame */
-    pub fn add_parameter(&mut self, parameter: VarDecl) -> () {
+    pub fn add_parameter(&self, parameter: VarDecl) -> () {
         let size = parameter.size;
-        let inst =  Instruction::Parameter;
-        let inst = self.instruction_arena.insert(inst);
-        self.locals.entry(parameter).or_insert(inst);
-        self.parameters_offset += size;
+        
+        let mut frame = &self.stack_frame;
+        let loc = MemoryLocation::Parameter(size, frame.parameters_offset);
+        frame.locals.entry(parameter).or_insert(loc);
+        frame.parameters_offset += size;
     }
 
-    pub fn add_local(&mut self, local: VarDecl, alloca: InstructionHandle) -> () { // Do we need scope information here? (scope: ScopeHandle)
+    pub fn add_local(&mut self, local: VarDecl) -> () { // Do we need scope information here? (scope: ScopeHandle)
         let size = local.size;
-        self.locals.entry(local).or_insert(alloca);
-        self.locals_offset += size;
+        
+        let mut frame = &self.stack_frame;
+        let loc = MemoryLocation::Stack(size, frame.locals_offset);
+        frame.locals.entry(local).or_insert(loc);
+        frame.locals_offset += size;
     }
+    
 
     pub fn resolve_bb(&self, basic_block_h: BasicBlockHandle) -> &BasicBlock {
         self.basic_block_arena.get(basic_block_h).unwrap()
@@ -173,13 +184,16 @@ impl <'ctx> CFG<'ctx> {
     }
 
     /* Add this to stack frame bro */
+    /*
     pub fn add_alloca(&mut self, decl: VarDecl) -> InstructionHandle {
         let size = self.get_const(self.entry, decl.size.try_into().unwrap());
         // Parameter:
+        let loc = MemoryLocation::Stack(, self.)
+        self.stack_frame.locals.insert(decl, loc);
         let alloca = self.add_to_entry(Instruction::Allocate(size)); // Add an alloca instruction to entry bb
         self.add_local(decl.clone(), alloca); // Add alloca and decl to the locals of the CFG.
         alloca
-    }
+    }  */
 
     pub fn get_inst(&self, inst_h: &InstructionHandle) -> &Instruction<'ctx> {
         self.instruction_arena.get(*inst_h).expect("instruction handle not valid")
@@ -206,18 +220,20 @@ impl <'ctx> CFGPrintable<'ctx> {
         
         let mut params_str = String::new();
     
-        for param in self.cfg.locals.keys() {
+        for param in self.cfg.stack_frame.locals.keys() {
+            /* 
             match param {
-                VarDecl<Parameter> => {
+                VarDecl::Parameter => {
 
                 },
                 VarDecl<_> => {
 
                 }
-            }
+            } */
+            // TODO: Move is_parameter to a separate type. 
             if param.is_parameter {
-                let p = self.cfg.locals.get(param).expect("oh no!");
-                let inst_name = self.get_inst_name(p);
+                let p = self.cfg.stack_frame.locals.get(param).expect("oh no!");
+                let inst_name = self.get_loc_name(p);
                 let ty = self.cfg.context.resolve_type(&param.type_info);
                 let ty = TypePrintable { data: ty, context: self.cfg.context };
                 params_str.push_str(&format!("{ty} {} ", inst_name));
@@ -256,7 +272,7 @@ impl <'ctx> CFGPrintable<'ctx> {
     pub fn get_loc_name(&self, loc: &MemoryLocation) -> String {
         match loc {
             MemoryLocation::Stack(_, _) => todo!(),
-            MemoryLocation::Parameters(_, _) => todo!(),
+            MemoryLocation::Parameter(_, _) => todo!(),
             MemoryLocation::Data(_) => todo!(),
             MemoryLocation::Label(_) => todo!(),
             MemoryLocation::Cast(op) => format!("cast {}", self.get_op_name(op))
@@ -374,9 +390,6 @@ impl BasicBlock {
     }
 }
 
-
-
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOpType {
     Add,
@@ -407,11 +420,13 @@ pub enum UnaryOpType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MemoryLocation {
-    Stack (u32, u32), // Size, offset 
-    Parameters (u32, u32), // 
-    Data (u32),
-    Label (u32),
-    Cast (Operand) /* Cast an arbitrary expression to a memory location */
+    Stack (usize, usize), // Size, offset 
+    Parameter (usize, usize), // Size, offset 
+    Data (u32), /* Not really sure what these are, probably should be a index into a CFGs data vec.  */
+    Label (u32), /* Not really sure what these are, probably should be &str  */
+
+    /* Cast an arbitrary expression to a memory location */
+    Cast (Operand) 
 }
 
 /* =============== Instruction ============ */
@@ -421,11 +436,8 @@ pub enum Instruction<'ctx> {
     /* Cast a memory location to a value */
     Lea(MemoryLocation), 
 
-    // Need some way to describe complex / runtime variable memory locations with an expression? 
-    // Basically dumb things like *(&b + 10) = 4;
-    // This should compile but we need to described *(&b + 10) as a 'memory location'
     Load(MemoryLocation),
-    Store(Operand, MemoryLocation), // Typed References but all in the same arena? Lets see what Happens
+    Store(Operand, MemoryLocation), 
 
     BinaryOp(BinaryOpType, Operand, Operand), // Include Comparisons.
     UnaryOp(UnaryOpType, Operand),
@@ -443,6 +455,7 @@ pub enum Operand {
     Const(i32),
 }
 
+
 impl From<InstructionHandle> for Operand {
     fn from(value: InstructionHandle) -> Self {
         Operand::Instruction(value)
@@ -454,6 +467,3 @@ impl From<i32> for Operand {
         Operand::Const(value)
     }
 }
-
-
-

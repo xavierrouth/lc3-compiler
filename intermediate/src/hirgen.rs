@@ -1,6 +1,7 @@
+use core::panic;
 use std::{cell::RefCell, rc::Rc, collections::HashMap};
 
-use crate::{TypedArena, hir::{HIR, CFG, BasicBlock, BasicBlockHandle, Instruction, Operand, InstructionHandle, self}};
+use crate::{TypedArena, hir::{HIR, CFG, BasicBlock, BasicBlockHandle, Instruction, Operand, InstructionHandle, self, MemoryLocation}};
 
 use analysis::{symtab::{SymbolTable, ScopeHandle, VarDecl}, typedast::{TypedAST, TypedASTNode, TypedASTNodeHandle}};
 use lex_parse::{ast::{ASTNodeHandle, AST, ASTNode, self}, error::ErrorHandler, context::Context};
@@ -49,60 +50,92 @@ impl <'a> HIRGen<'a> {
         self.hir
     }
 
+    /* Mutually recursive,
+     emit_location() -> MemoryLocation,
+     emit_expression() 
+     
+     */
+
+    /* Lower an expression to a memory location */
+    fn emit_location(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> MemoryLocation {
+
+        let node: &TypedASTNode = self.ast.get(node_h);
+        match node {
+            /* Commit to removing */
+            TypedASTNode::SymbolRef { identifier, decl, ty } => {
+                let loc = cfg.get_location(decl.clone());
+
+                // TOOD: What is type info doing here (maybe for sized copies??? )
+                let ty = decl.type_info;
+                let ty = self.context.resolve_type(&ty);
+                
+                // TODO: What is lea doing here? 
+                // let lea_inst = Instruction::Lea(loc.clone());
+                //let lea_inst = cfg.add_inst(basic_block_h, lea_inst);
+                loc.clone()
+            }
+            TypedASTNode::FieldRef { identifier, ty } => {
+                todo!()
+            }
+            /* Put back, and treat as normal expression*/
+            _ => MemoryLocation::Cast(self.emit_expression(cfg, basic_block_h, node_h)),
+
+        }
+    }
+
     /* Lower an expression */
     fn emit_expression(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> Operand {
-        let node = self.ast.remove(node_h); /* Consume the node */
+        let node = self.ast.remove(node_h); /* Consume the node 
+        TODO: This should be an optional consume (consume is compiler feels like it is optimal) / just a get() call, 
+        we are only 'removing / consuming' so we don't accidently reuse the same node, not to save resources, because at this point 
+        NO MORE AST notes are generated. */
         match node {
             TypedASTNode::IntLiteral { value } => {
                 value.into()
             }
             TypedASTNode::LvalueToRvalue { child, ty } => {
-                // TODO Optimization Potential: reduce LValueToRValue on SymbolRef to load form SymbolRef location.
-                // TODO Optimization Potential: reduce LValueToRValue on ArrayAccess to load form ArrayAccess location.
-                // TODO Optimization Potential: reduce LValueToRValue on DotAccess on FieldRef to load form FieldRef location.
+                /* TODO: Optimization Potential Here:  
+                - reduce LValueToRValue on SymbolRef to load form SymbolRef location.
+                - reduce LValueToRValue on ArrayAccess to load form ArrayAccess location.
+                - reduce LValueToRValue on DotAccess on FieldRef to load form FieldRef location.
 
-                // Wow, seems like these could all be handled by similar code?
+                Wow, seems like these could all be handled by similar code?
 
-                // How to pattern match on handles. You can't really huh!.
-                // JK you can, need to use match guards with an if condition on unwrapping the child handles and checking their type. 
-                // matches!() for variants, not std::mem::discriminant.
-                let child = self.emit_expression(cfg, basic_block_h, child);
+                How to pattern match on handles. You can't really huh!.
+                JK you can, need to use match guards with an if condition on unwrapping the child handles and checking their type. 
+                matches!() for variants, not std::mem::discriminant.
+                */
+                
+
+                let child = self.emit_location(cfg, basic_block_h, child);
                 let load = Instruction::Load(child);
                 let load = cfg.add_inst(basic_block_h, load);
                 load.into()
             }
             TypedASTNode::FunctionCall { symbol_ref, arguments, ty } => todo!(),
-            TypedASTNode::SymbolRef { identifier, decl, ty } => {
-                let loc = cfg.get_location(decl.clone());
-
-                let ty = decl.type_info;
-                let ty = self.context.resolve_type(&ty);
-          
-                // let lea_inst = Instruction::Lea(loc.clone());
-                //let lea_inst = cfg.add_inst(basic_block_h, lea_inst);
-                (*loc).into()
-            }
-            TypedASTNode::FieldRef { identifier, ty } => todo!(),
             TypedASTNode::BinaryOp { op, left, right, ty } => {
                 match op {
                     ast::BinaryOpType::Assign => {
-                        let rhs = self.emit_expression(cfg, basic_block_h, right).into();
+                        let rhs = self.emit_expression(cfg, basic_block_h, right);
                         // Previously we have optimized here, but IG we will just do that later *shrug*.
-                        let lhs = self.emit_expression(cfg, basic_block_h, left).into();
+                        let lhs = self.emit_location(cfg, basic_block_h, left);
                         // Treat LHS as a memory location.
-                        let store = cfg.add_inst(basic_block_h, Instruction::Store(lhs, rhs));
+                        let store = cfg.add_inst(basic_block_h, Instruction::Store(rhs, lhs));
 
                         rhs
                     }
                     ast::BinaryOpType::ArrayAccess => {
-                        let base = self.emit_expression(cfg, basic_block_h, left).into();
+                        // This is frustrating that we need a cast here, 
+                        let base = self.emit_location(cfg, basic_block_h, left);
+
+                        // Do pointer arithmetic, emit cgen for a multiply or something maybe not really sure. 
                         let offset = self.emit_expression(cfg, basic_block_h, right).into();
                         
                         // Could previously be optimized based on lvalue and rvalue things.
-                        //let inst = cfg.add_inst(basic_block_h, Instruction::Lea(MemoryLocation::Expr(base)));
+                        let lea = cfg.add_inst(basic_block_h, Instruction::Lea(base));
 
                         // Pointer math:
-                        let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(hir::BinaryOpType::Add, base, offset));
+                        let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(hir::BinaryOpType::Add, lea.into(), offset));
                         inst.into()
                     }
                     _ => {
@@ -110,32 +143,39 @@ impl <'a> HIRGen<'a> {
                         // Previously we have optimized here, but IG we will just do that later *shrug*.
                         let lhs = self.emit_expression(cfg, basic_block_h, left);
 
-                        let op = match op {
-                            ast::BinaryOpType::Add => hir::BinaryOpType::Add,
-                            ast::BinaryOpType::Sub => hir::BinaryOpType::Sub,
-                            ast::BinaryOpType::Mul => hir::BinaryOpType::Mul,
-                            ast::BinaryOpType::Div => hir::BinaryOpType::Div,
-                            ast::BinaryOpType::Mod => hir::BinaryOpType::Mod,
-                            ast::BinaryOpType::LogAnd |
-                            ast::BinaryOpType::BitAnd => hir::BinaryOpType::And,
-                            ast::BinaryOpType::LogOr | 
-                            ast::BinaryOpType::BitOr => hir::BinaryOpType::And,
-                            ast::BinaryOpType::LessThan => hir::BinaryOpType::LessThan,
-                            ast::BinaryOpType::GreaterThan => hir::BinaryOpType::GreaterThan,
-                            ast::BinaryOpType::LessThanEqual => hir::BinaryOpType::LessThanEqual,
-                            ast::BinaryOpType::GreaterThanEqual => hir::BinaryOpType::GreaterThanEqual,
-                            ast::BinaryOpType::NotEqual => hir::BinaryOpType::NotEqual,
-                            ast::BinaryOpType::EqualEqual => hir::BinaryOpType::EqualEqual,
+                        
+                        {
+                            use ast::BinaryOpType as ast;
+                            use hir::BinaryOpType as hir;
+            
+                        let op: hir = match op {
+                            
+                            ast::Add => hir::Add,
+                            ast::Sub => hir::Sub,
+                            ast::Mul => hir::Mul,
+                            ast::Div => hir::Div,
+                            ast::Mod => hir::Mod,
+                            ast::LogAnd |
+                            ast::BitAnd => hir::And,
+                            ast::LogOr | 
+                            ast::BitOr => hir::And,
+                            ast::LessThan => hir::LessThan,
+                            ast::GreaterThan => hir::GreaterThan,
+                            ast::LessThanEqual => hir::LessThanEqual,
+                            ast::GreaterThanEqual => hir::GreaterThanEqual,
+                            ast::NotEqual => hir::NotEqual,
+                            ast::EqualEqual => hir::EqualEqual,
 
-                            ast::BinaryOpType::LeftShift => todo!(),
-                            ast::BinaryOpType::RightShift => todo!(),
-                            ast::BinaryOpType::LeftShiftAssign => todo!(),
-                            ast::BinaryOpType::RightShiftAssign => todo!(),
+                            ast::LeftShift => todo!(),
+                            ast::RightShift => todo!(),
+                            ast::LeftShiftAssign => todo!(),
+                            ast::RightShiftAssign => todo!(),
                             _ => panic!("bad op type for hir")
                         };
-                        
                         let inst = cfg.add_inst(basic_block_h, Instruction::BinaryOp(op, lhs.into(), rhs.into()));
                         inst.into()
+                        }
+                        
                     } 
                 }
             }
@@ -146,23 +186,30 @@ impl <'a> HIRGen<'a> {
         }
     }
 
-    // By nature of using arenas and handles, all references are mutable, should there be separate types?
+    // NOTE: By nature of using arenas and handles, all references are mutable, should there be separate types?
     /* 
-
+    Recursively lower a function into a series of basic blocks. 
      */
-    fn build_function_bb(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> basic_block_h {
+    fn build_function_bb(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> BasicBlockHandle {
         let node = self.ast.remove(node_h);
         match node {
             // Non-Control changing statements
             TypedASTNode::VariableDecl { decl, initializer, type_info } => {
-                /* Add allocation to entry */
-                let alloca = cfg.add_alloca(decl.clone());
+                /* Add allocation to stack frame */
+                // TODO: Make is_parameter in the type info. 
+                if decl.is_parameter {
+                    cfg.add_parameter(decl);
+                }
+                else {
+                    cfg.add_local(decl);
+                }
+                
 
                 /* Add Initializer to wherever we are (might dynamically calcaulted intialization)*/
                 if let Some(initializer) = initializer {
                     let init = self.emit_expression(cfg, basic_block_h, initializer);
                     let loc = cfg.get_location(decl.clone());
-                    cfg.add_inst(basic_block_h, Instruction::Store(alloca.into(), init.into()));
+                    cfg.add_inst(basic_block_h, Instruction::Store(init, loc));
                 }
                 
             }
@@ -203,25 +250,25 @@ impl <'a> HIRGen<'a> {
                         let br = Instruction::CondBr(cond.into(), if_bb, else_bb);
                         cfg.set_terminator(basic_block_h, br);
 
-                        self.build_function_bb(cfg, if_bb, if_branch);
+                        if_bb = self.build_function_bb(cfg, if_bb, if_branch);
                         cfg.add_inst(if_bb, Instruction::Br(end_bb));
 
-                        self.build_function_bb(cfg, else_bb, else_branch);
+                        else_bb = self.build_function_bb(cfg, else_bb, else_branch);
                         cfg.add_inst(else_bb, Instruction::Br(end_bb));
 
-                        *basic_block_h = end_bb;
+                        return end_bb;
                     }
                     None => {
                         let end_name = self.context.get_string("end");
                         let end_bb = cfg.new_bb(end_name);
 
                         let br = Instruction::CondBr(cond.into(), if_bb, end_bb);
-                        cfg.set_terminator(*basic_block_h, br);
+                        cfg.set_terminator(basic_block_h, br);
 
-                        self.build_function_bb(cfg, &mut if_bb, if_branch);
+                        if_bb = self.build_function_bb(cfg, if_bb, if_branch);
                         cfg.add_inst(if_bb, Instruction::Br(end_bb));
 
-                        *basic_block_h = end_bb;
+                        return end_bb;
                     }
                 }
 
@@ -230,6 +277,7 @@ impl <'a> HIRGen<'a> {
             
             _ => todo!()
         }
+        basic_block_h
     }
 
     // is CFG -> CFG preferred or just &mut CFG -> (). Interesting question
@@ -257,8 +305,9 @@ impl <'a> HIRGen<'a> {
 
         let entry = cfg.entry;
         cfg.set_terminator(entry, Instruction::Br(work));
+
         // Generate 
-        self.build_function_bb(&mut cfg, &mut work, body);
+        work = self.build_function_bb(&mut cfg, work, body);
         cfg
 
     }

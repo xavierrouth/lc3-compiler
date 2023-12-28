@@ -139,7 +139,6 @@ pub enum Data {
     Array(),
     Empty(),
     Struct() // Don't support these for now.
-
 }
 
 // Surely there is a way to implement this automatically
@@ -172,8 +171,8 @@ impl From<Immediate> for RegisterOrImmediate {
 pub enum Inst {
     /* Dataflow Instructions (Should we remove result register?) */ 
     /* Unclear if it makes sense to distinguish between register vs immediates here,  */
-    Add(RegisterOrImmediate, RegisterOrImmediate),
-    And(RegisterOrImmediate, RegisterOrImmediate),
+    Add(Register, RegisterOrImmediate),
+    And(Register, RegisterOrImmediate),
     //AddReg(Register, Register),
     //AddImm(Register, Immediate),
     //AndReg(Register, Register),
