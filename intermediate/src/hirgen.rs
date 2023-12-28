@@ -198,10 +198,10 @@ impl <'a> HIRGen<'a> {
                 /* Add allocation to stack frame */
                 // TODO: Make is_parameter in the type info. 
                 if decl.is_parameter {
-                    cfg.add_parameter(decl);
+                    cfg.add_parameter(decl.clone());
                 }
                 else {
-                    cfg.add_local(decl);
+                    cfg.add_local(decl.clone());
                 }
                 
 

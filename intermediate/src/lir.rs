@@ -9,15 +9,33 @@ but everything should be target specific at this point (so its codegen'd, not re
  * Starts in SSA and then register allocation to non-ssa? Probably somethjing like that makes sense.
  * 
  * Some optimizations / passes we want to do here
- *  Condition code analysis
+
+ * 
  *  Peephole optimizations (is this just pattern matching again kinda)
  *  Register Allocation
- *  
- *  
+ *  callee save only used regs, calleer save only used regs
+ * 
  *  Pattern matching instruction selection? (what does this even mean lol)
  *  What else is there to do?
  * 
  *  Is this just an instruction DAG  for each BasicBlock -> Block?
+ * 
+ * Some things we want to add eventually might be, (need to support blocks referencing each other and such)
+ * - block reordering based on condition code analysis or something, optimize fall throughs
+ * - 
+ * - 
+ * 
+ * As refernces, some passes LLVM does on their machine IR
+ * BEFORE REG ALLOC
+ * - Machine Common Subexpression Elimination
+ * - Machine LICM
+ * - Peephole Optimizer
+ * - Machine DCE
+ * 
+ * AFTER REG ALLOC
+ * - Prolog / Epilog insertion
+ * - Machine Instruction Scheduling (2nd time scheudling)
+ * - Block Placement
  * 
  */
 
@@ -36,7 +54,6 @@ pub struct LIR<'ctx> {
     // Pre register allocation
     pub instruction_arena: SlotMap<InstHandle, Inst>,
 
-    // Total odering because fallthrough matters?
     pub functions: Vec<Function>,
 
     // Data section, 
@@ -50,6 +67,14 @@ impl <'ctx> LIR <'ctx> {
         println!("hi bingle :)")
     }
 }
+
+/* ======== Stack Frame ============ */
+
+pub struct StackFrame {
+    parameters_size: usize,
+    locals_size: usize,
+}
+
 /* Eventually we could have different function types that support different calling converntions,
 *  This represents a function with the classic C calling convention. */
 #[derive(Debug, Clone, PartialEq)]
@@ -59,8 +84,8 @@ pub struct Function {
     pub(crate) setup: Block,
     pub(crate) teardown: Block,
     pub(crate) optimize: bool,
+
     /* TODO: Add a field represnting the stack frame maybe? Mapping certain ops to memory locations. */
-    pub(crate) stack_frame: HashMap<InstructionHandle, i32> // i32 is stack offset.
 }
 
 /* Not a basic block, just a block, this is lower level in the same way as explained above*/
@@ -102,6 +127,7 @@ pub enum Register {
     HRegister(usize), /* Hardware Register, in between 0 and 3 probably */
     StackPointer,
     FramePointer,
+    ZeroReg,
 } 
 
 impl From<InstHandle> for Register {

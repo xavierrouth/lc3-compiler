@@ -34,21 +34,21 @@ impl <'ctx> HIR<'ctx> {
     }
 }
 
-/* ======== Stack Frame ============ */
+/* ======== Var Info ============ */
 
 #[derive(Debug, Clone)]
-struct StackFrame {
+pub struct VarInfo {
     locals: HashMap<VarDecl, MemoryLocation>,
-    parameters_offset: usize,
-    locals_offset: usize,
+    parameters_size: usize,
+    locals_size: usize,
 }
 
-impl StackFrame {
-    fn new() -> StackFrame {
-        StackFrame {
+impl VarInfo {
+    fn new() -> VarInfo {
+        VarInfo {
             locals: HashMap::new(),
-            parameters_offset: 0,
-            locals_offset: 0,
+            parameters_size: 0,
+            locals_size: 0,
         }
     }
 }
@@ -73,7 +73,7 @@ pub struct CFG<'ctx> {
     return_ty: InternedType, 
 
     /* Stack Frame */
-    pub(crate) stack_frame: StackFrame,
+    pub(crate) stack_frame: VarInfo,
 
     // Globals??
     // Ref to 'globals' hashmap?
@@ -109,7 +109,7 @@ impl <'ctx> CFG<'ctx> {
             basic_block_order,
             name,
             entry,
-            stack_frame: StackFrame::new(),
+            stack_frame: VarInfo::new(),
         }
     }
 
@@ -131,22 +131,22 @@ impl <'ctx> CFG<'ctx> {
     }
 
     /* Move to stack frame */
-    pub fn add_parameter(&self, parameter: VarDecl) -> () {
+    pub fn add_parameter(&mut self, parameter: VarDecl) -> () {
         let size = parameter.size;
         
-        let mut frame = &self.stack_frame;
-        let loc = MemoryLocation::Parameter(size, frame.parameters_offset);
+        let  frame = &mut self.stack_frame;
+        let loc = MemoryLocation::Parameter(size, frame.parameters_size);
         frame.locals.entry(parameter).or_insert(loc);
-        frame.parameters_offset += size;
+        frame.parameters_size += size;
     }
 
     pub fn add_local(&mut self, local: VarDecl) -> () { // Do we need scope information here? (scope: ScopeHandle)
         let size = local.size;
         
-        let mut frame = &self.stack_frame;
-        let loc = MemoryLocation::Stack(size, frame.locals_offset);
+        let  frame = &mut self.stack_frame;
+        let loc = MemoryLocation::Stack(size, frame.locals_size);
         frame.locals.entry(local).or_insert(loc);
-        frame.locals_offset += size;
+        frame.locals_size += size;
     }
     
 

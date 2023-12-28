@@ -10,12 +10,14 @@ use slotmap::{SparseSecondaryMap, SlotMap};
 *  and validated (immediate sizes, imm, imm operands, etc.) */
 /* Bascially LIR is invalid LC3, they mostly are the same besides that. */
 pub struct LIRGen<'a> {
+    
+
+    hreg_to_lreg: HashMap<InstructionHandle, InstHandle>, // We aren't doin ga recursive traversal to lower so we need this mapping!
+    lir: LIR<'a>,
+
     // External Information
     hir: HIR<'a>,
     context: &'a Context<'a>,
-
-    hreg_to_lreg: HashMap<InstructionHandle, InstHandle>,
-    lir: LIR<'a>,
 }
 
 
@@ -31,10 +33,8 @@ impl <'a> LIRGen<'a> {
         }
     }
 
-    /* Calculates stack frame and such, handle allocas here. JK i don't feel like it lOL! */
     pub fn prepare_cfg(&mut self, cfg: &mut CFG<'a>) -> () {
-        /* We could remove all allocas here, but that is lamerton! */
-        cfg.instruction_arena
+        ()
     }
 
     pub fn run(mut self) -> LIR<'a> {
@@ -76,13 +76,14 @@ impl <'a> LIRGen<'a> {
             setup: prologue,
             teardown: epilogue,
             optimize: false,
-            stack_frame: HashMap::new(), // Map allocas to stack space.
+            //stack_frame: HashMap::new(), // Map allocas to stack space.
         };
 
         for basic_block_h in &cfg.basic_block_order {
             let block = self.lower_bb(&cfg, &basic_block_h);
             func.blocks.push(block);
         }
+
         func
     }
 
@@ -113,8 +114,16 @@ impl <'a> LIRGen<'a> {
         (*a).into()
     }
 
-    fn get_memory_location(&mut self, hir_instruction_h: InstructionHandle) -> MemoryLocation {
 
+    fn materialize_constant(&mut self, imm: Immediate) -> Register {
+        Register::VRegister(self.add_inst(Inst::Add(Register::ZeroReg, imm.into())))
+    }
+
+    fn into_reg (&mut self, rhs: RegisterOrImmediate) -> Register {
+        match rhs {
+            RegisterOrImmediate::Register(r) => r,
+            RegisterOrImmediate::Immediate(v) => self.materialize_constant(v)
+        }
     }
 
     /* Can't do a recursive backwards dependency traversal from the return node becasue then we might accidentally do D.C.E and 
@@ -143,31 +152,45 @@ impl <'a> LIRGen<'a> {
                 todo!()
                 
             }, */
-            Instruction::Allocate(_) => todo!("unexpected allocate isntruction"),
-            Instruction::Parameter => todo!("unexpected parameter instruction"),
             Instruction::Load(op) => {
                 // TODO: Check where we are loading from!.
                 // For stack, emit LDR
                 // For global, emit LD 
                 //
             },
-            Instruction::LoadOffset(_, _) => todo!(),
             Instruction::Store(_, _) => todo!(),
-            Instruction::StoreOffset(_, _, _) => todo!(),
             Instruction::BinaryOp(op, lhs, rhs) => {
-                /* They really shouldn't both be immidiates! */
+                /* They really shouldn't both be immidiates!, if lhs is an immediate then load it into a register and cry. */
                 let lhs = self.lower_hir_op(*lhs);
                 let rhs = self.lower_hir_op(*rhs);
+
+                use RegisterOrImmediate as RoI;
+
+                /* For commutative ops, confirm that at least one of the operands is a register, if not make it one */
+                // TODO: Make sure this is like inlined or something idk? 
+                fn destruct (rhs: RoI, lhs: RoI) -> (Register, RoI) {
+                    match (lhs.clone(), rhs.clone()) {
+                        (RoI::Register(l), RoI::Register(_)) => (l, rhs),
+                        (RoI::Register(l), RoI::Immediate(_)) => (l, rhs),
+                        (RoI::Immediate(_), RoI::Register(r)) => (r, lhs),
+                        (RoI::Immediate(_), RoI::Immediate(_)) => todo!(), // TODO: write a function that materializes immediates 
+                    }
+                } 
+
                 
+
+
                 /* Should we do optimizations here or save for later. They would work so well here! */
                 let res = match op {
                     hir::BinaryOpType::Add => {
-                        let inst = Inst::Add(lhs, rhs);
+                        let (reg, imm) = destruct(lhs, rhs);
+                        let inst = Inst::Add(reg, imm);
                         let inst= self.add_inst(inst);
                         inst
                     }
                     hir::BinaryOpType::Sub => {
-                        let lhs = self.add_inst(Inst::Add(lhs, (-1).into())); // This is awesome that this works, howeve rcan't we just spam .into() automatically? 
+                        let lhs = self.into_reg(lhs);
+                        let lhs = self.add_inst(Inst::Add(lhs.into(), (-1).into())); // This is awesome that this works, howeve rcan't we just spam .into() automatically? 
                         // ^^^ Why do i have to call into. I hope it doesn't actually compile to anything
                         let lhs: Register = self.add_inst(Inst::Not(lhs.into())).into();
                         // Just kidding, this is a mess! wtf.
@@ -177,6 +200,7 @@ impl <'a> LIRGen<'a> {
                         // Seems to only call into() automcatcally on function parameters / returns, wonder if we can get it to do it for struct / enum constructors.
                     }
                     hir::BinaryOpType::And => {
+                        let lhs = self.into_reg(lhs);
                         let inst = self.add_inst(Inst::And(lhs, rhs));
                         inst
                     }
@@ -206,6 +230,7 @@ impl <'a> LIRGen<'a> {
                 // Jump to teardown.
             }
             Instruction::Call(_) => todo!(),
+            Instruction::Lea(_) => todo!(),
         }
     }
 
