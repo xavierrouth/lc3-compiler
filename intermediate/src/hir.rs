@@ -236,7 +236,7 @@ impl <'ctx> CFGPrintable<'ctx> {
                 let inst_name = self.get_loc_name(p);
                 let ty = self.cfg.context.resolve_type(&param.type_info);
                 let ty = TypePrintable { data: ty, context: self.cfg.context };
-                params_str.push_str(&format!("{ty} {} ", inst_name));
+                params_str.push_str(&format!("{ty} {}, ", inst_name));
             }
         }
 
@@ -271,8 +271,8 @@ impl <'ctx> CFGPrintable<'ctx> {
 
     pub fn get_loc_name(&self, loc: &MemoryLocation) -> String {
         match loc {
-            MemoryLocation::Stack(_, _) => todo!(),
-            MemoryLocation::Parameter(_, _) => todo!(),
+            MemoryLocation::Stack(_, i) => format!("stack @ {i}"),
+            MemoryLocation::Parameter(_, i) => format!("param @ {i}"),
             MemoryLocation::Data(_) => todo!(),
             MemoryLocation::Label(_) => todo!(),
             MemoryLocation::Cast(op) => format!("cast {}", self.get_op_name(op))
@@ -328,8 +328,8 @@ impl <'ctx> CFGPrintable<'ctx> {
                     }
                 } */
             }
-            Instruction::Store(location, operand) => {
-                format!("store {} <- {}", self.get_op_name(location), self.get_loc_name(operand.into())) 
+            Instruction::Store(operand, location) => {
+                format!("store {} <- {}", self.get_loc_name(location), self.get_op_name(operand)) 
                 /* 
                 match location {
                     

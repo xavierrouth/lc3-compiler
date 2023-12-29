@@ -25,7 +25,7 @@ but everything should be target specific at this point (so its codegen'd, not re
  * - 
  * - 
  * 
- * As refernces, some passes LLVM does on their machine IR
+ * As a reference, these are some passes LLVM does on their machine IR:
  * BEFORE REG ALLOC
  * - Machine Common Subexpression Elimination
  * - Machine LICM
@@ -46,14 +46,13 @@ use lex_parse::context::{InternedString, Context};
 use slotmap::SlotMap;
 
 slotmap::new_key_type! { pub struct InstHandle; }
+slotmap::new_key_type! { pub struct BlockHandle; }
 
 #[derive(Debug, Clone)]
 pub struct LIR<'ctx> {
     // This is confusing, maybe we should do something about it. What even happens after register allocation?
 
     // Pre register allocation
-    pub instruction_arena: SlotMap<InstHandle, Inst>,
-
     pub functions: Vec<Function>,
 
     // Data section, 
@@ -63,8 +62,16 @@ pub struct LIR<'ctx> {
 }
 
 impl <'ctx> LIR <'ctx> {
-    pub fn print(&self) -> (){
+    pub fn print(&self) -> () {
         println!("hi bingle :)")
+    }
+
+    pub fn new(context: &'ctx Context<'ctx>) -> LIR<'ctx> {
+        LIR {
+            functions: Vec::new(), 
+            data: Vec::new(),
+            context,
+        }
     }
 }
 
@@ -77,12 +84,18 @@ pub struct StackFrame {
 
 /* Eventually we could have different function types that support different calling converntions,
 *  This represents a function with the classic C calling convention. */
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub(crate) name: InternedString,
-    pub(crate) blocks: Vec<Block>,
-    pub(crate) setup: Block,
-    pub(crate) teardown: Block,
+
+    // Don't have a block ordering yet. 
+    // pub(crate) blocks: Vec<Block>,
+
+    pub block_arena: SlotMap<BlockHandle, Block>,
+    pub inst_arena: SlotMap<InstHandle, Inst>,
+
+    pub(crate) setup: BlockHandle,
+    pub(crate) teardown: BlockHandle,
     pub(crate) optimize: bool,
 
     /* TODO: Add a field represnting the stack frame maybe? Mapping certain ops to memory locations. */
@@ -205,9 +218,9 @@ pub enum Inst {
     //AndImm(Register, Immediate),
     Not(Register),
 
-    St(Label),
-    Sti(Register, Label),
-    Str(Register, Register, Immediate),
+    St(Register, Label),
+    Sti(Register, Label), // Indirect Store (use for casts)
+    Str(Register, Register, Immediate), // Source, Base, Offset
     Ld(Register, Label), // Should be Label or immediate, but almost always Label
     Ldi(Register, Label),
     Ldr(Register, Register, Immediate),

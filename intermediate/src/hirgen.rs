@@ -190,10 +190,10 @@ impl <'a> HIRGen<'a> {
     /* 
     Recursively lower a function into a series of basic blocks. 
      */
-    fn build_function_bb(&mut self, cfg: &mut CFG<'a>, basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> BasicBlockHandle {
+    fn build_function_bb(&mut self, cfg: &mut CFG<'a>, mut basic_block_h: BasicBlockHandle, node_h: TypedASTNodeHandle) -> BasicBlockHandle {
         let node = self.ast.remove(node_h);
         match node {
-            // Non-Control changing statements
+            // ============ Non-Control changing statements ==============
             TypedASTNode::VariableDecl { decl, initializer, type_info } => {
                 /* Add allocation to stack frame */
                 // TODO: Make is_parameter in the type info. 
@@ -220,10 +220,10 @@ impl <'a> HIRGen<'a> {
             },
             TypedASTNode::CompoundStmt { statements } => {
                 for stmt in statements {
-                    self.build_function_bb(cfg, basic_block_h, stmt);
+                    basic_block_h = self.build_function_bb(cfg, basic_block_h, stmt);
                 }
             }
-            // Control changing statements
+            // ========== Control changing statements ============
             TypedASTNode::ReturnStmt { expression } => {
                 // Do we want basic blocks for function teardown and function setup?
                 // No, this will happen in LIR. 
@@ -244,7 +244,7 @@ impl <'a> HIRGen<'a> {
                         let else_name = self.context.get_string("else.branch");
                         let mut else_bb = cfg.new_bb(else_name);
 
-                        let end_name = self.context.get_string("end");
+                        let end_name = self.context.get_string("end.branch");
                         let end_bb = cfg.new_bb(end_name);
 
                         let br = Instruction::CondBr(cond.into(), if_bb, else_bb);
@@ -259,7 +259,7 @@ impl <'a> HIRGen<'a> {
                         return end_bb;
                     }
                     None => {
-                        let end_name = self.context.get_string("end");
+                        let end_name = self.context.get_string("end.branch");
                         let end_bb = cfg.new_bb(end_name);
 
                         let br = Instruction::CondBr(cond.into(), if_bb, end_bb);
