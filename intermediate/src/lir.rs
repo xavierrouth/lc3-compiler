@@ -42,7 +42,7 @@ but everything should be target specific at this point (so its codegen'd, not re
  /* At this point give up on trying to do analysis on anything that is in memory (overflowed things). That is a completely reasonable decision right? 
   * */
 
-use lex_parse::context::{InternedString, Context};
+use lex_parse::{context::{InternedString, Context}, ast::WithContext};
 use slotmap::SlotMap;
 
 slotmap::new_key_type! { pub struct InstHandle; }
@@ -89,7 +89,7 @@ pub struct Subroutine {
     pub(crate) name: InternedString,
 
     // TODO: We don't have a block ordering yet. 
-    // pub(crate) blocks: Vec<Block>,
+    pub block_order: Vec<BlockHandle>,
 
     pub block_arena: SlotMap<BlockHandle, Block>,
     pub inst_arena: SlotMap<InstHandle, Inst>,
@@ -103,10 +103,12 @@ pub struct Subroutine {
     
 }
 
+
 impl Subroutine {
     pub fn new(name: InternedString) -> Subroutine {
         Subroutine {
             name, 
+            block_order: Vec::new(),
             block_arena: SlotMap::with_key(),
             inst_arena: SlotMap::with_key(),
             setup: None,
@@ -151,12 +153,49 @@ impl Subroutine {
     } 
 }
 
+/* ============= Subroutine Printable ============ */
+pub struct SubroutinePrintable<'ctx> {
+    pub context: &'ctx Context<'ctx>,
+    pub subroutine: Subroutine,
+}
+
+impl <'ctx> SubroutinePrintable<'ctx> {
+    pub fn new(subroutine: Subroutine, context: &'ctx Context<'ctx>) -> SubroutinePrintable<'ctx> {
+        SubroutinePrintable {
+            subroutine,
+            context,
+        }
+    } 
+
+    pub fn print(&self) {
+        let name = self.context.resolve_string(self.subroutine.name);
+        println!("subroutine: {}", name);
+
+        for block_handle in &self.subroutine.block_order {
+            self.print_block(block_handle);
+        }
+    }
+
+    fn print_block(&self, block_handle: &BlockHandle) -> () {
+        let block = self.subroutine.block_arena.get(*block_handle).expect("uh oh");
+        let Label::Label(label) = block.label;
+
+        let name = self.context.resolve_string(label);
+
+        println!("{block }", name);
+
+        for inst in &block.instruction_order {
+
+        }
+    }
+}
+
 /* ========== Block ============ */
 /* Not a basic block, just a block lol. LIR analogue of HIR's BasicBlock */
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub(crate) label: Label,
-    pub(crate) instructions: Vec<InstHandle>,
+    pub(crate) instruction_order: Vec<InstHandle>,
     pub(crate) optimize: bool, // Whether we are allowed to touch this for optimizations.
 }
 
