@@ -20,20 +20,13 @@ pub struct LIRGen<'ctx> {
     context: &'ctx Context<'ctx>,
 }
 
-struct LIRGenFunc<'ctx, 'ir> where 'ir: 'ctx {
-    
-
+struct LIRGenFunc<'ctx> {
     // HIR to LIR register map
     hreg_to_lreg: SecondaryMap<InstructionHandle, InstHandle>, // We aren't doin ga recursive traversal to lower so we need this mapping!
 
     // BB to Block Map
     bb_to_block: SecondaryMap<BasicBlockHandle, BlockHandle>, // This is annoying
 
-    subroutine: Subroutine,
-    cfg: CFG<'ir>,
-
-    lir: &'ir mut LIR<'ir>,
-    hir: &'ir mut HIR<'ir>,
     context: &'ctx Context<'ctx>,
 }
 
@@ -53,69 +46,68 @@ struct LIRGenFunc<'ctx, 'ir> where 'ir: 'ctx {
 
 /* Generator for a single function, so we don't have to pass state around through parameters.  */
 // This doesn't work it seems, should use parameters instead. 
-impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
+impl <'ctx> LIRGenFunc<'ctx> {
+
     pub fn new(
-        cfg: CFG<'ir>, 
-        lir: &'ir mut LIR<'ir>,
-        hir: &'ir mut HIR<'ir>,
         context: &'ctx Context<'ctx>
-    ) -> LIRGenFunc<'ctx, 'ir>  {
+    ) -> LIRGenFunc<'ctx>  {
 
         LIRGenFunc {
-            subroutine: Subroutine::new(cfg.name),
             hreg_to_lreg: SecondaryMap::new(), 
             bb_to_block: SecondaryMap::new(),
-            cfg,  
-            lir, 
-            hir, 
             context }
     }
 
+
+    pub fn run(self, cfg: CFG<'ctx>) -> Subroutine {
+        self.lower_subroutine(cfg)
+    }
+    
     /* Iterates over the basic blocks and lowers them to lc3-lir */
-    fn lower_subroutine(mut self) -> Subroutine {
+    fn lower_subroutine(mut self, mut cfg: CFG<'ctx>) -> Subroutine {
 
         /* Get a mapping, then actually generate code for them */
-        let order = self.cfg.basic_block_order;
+        let order = cfg.basic_block_order.clone()  ;
 
-        
+        let mut subroutine = Subroutine::new(cfg.name);
+
+        /* Map HIR basic blocks to LIR blocks */
         for basic_block_h in &order {
-            let name = self.cfg.basic_block_arena.get(*basic_block_h).unwrap().name;
-            let block_h = self.subroutine.block_arena.insert(
+
+            let name = cfg.basic_block_arena.get(*basic_block_h).unwrap().name;
+            let block_h = subroutine.block_arena.insert(
                 Block { label: Label::Label(name), instructions: Vec::new(), optimize: true }
             );
 
             self.bb_to_block.insert(*basic_block_h, block_h);
         }
 
+        /* Populate LIR blocks */
         for basic_block_h in &order {
             /* THIS DOESN"T USE .basic_block_order or .cfg, stop complainign PELASE  */
-
-            self.lower_bb(&basic_block_h);
+            let block_h = self.bb_to_block.get(*basic_block_h).unwrap().clone();
+            self.lower_bb((basic_block_h, &block_h), &mut cfg, &mut subroutine);
         }
 
-        self.subroutine
+        subroutine
     }
 
+
     /* Iterates over the istructions in the block and lowers them to lc3-ir grouped into a Block? */
-    fn lower_bb(&mut self, basic_block_h: &BasicBlockHandle) -> () {
+    fn lower_bb(&mut self, block_info: (&BasicBlockHandle, &BlockHandle), cfg: &mut CFG<'ctx>, subroutine: &mut Subroutine) -> () {
         let mut instructions = Vec::new();
 
-        let cfg = &self.cfg;
-
+        let (basic_block_h, block_h) = block_info;
         /* Loop through instructions and lower each instruction */
         
-        for instruction_h in self.cfg.resolve_bb(*basic_block_h).instructions {
+        for instruction_h in &cfg.resolve_bb(*basic_block_h).instructions {
             // Need to automatically add the ordering to the instructions vec. Oops!
-            let inst = self.lower_hir_inst(instruction_h);
+            let inst = self.lower_hir_inst(instruction_h, cfg, subroutine);
             instructions.push(inst);
         }
 
-        let block = self.bb_to_block.get_mut(*basic_block_h).unwrap();      
     }
 
-    pub fn add_inst(&mut self, inst: Inst) -> InstHandle {
-        self.subroutine.inst_arena.insert(inst)
-    }
 
     fn get_virtual_reg(&mut self, hir_instruction_h: InstructionHandle) -> Register {
 
@@ -124,37 +116,11 @@ impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
     }
 
 
-    fn materialize_constant(&mut self, imm: Immediate) -> Register {
-        Register::VRegister(self.add_inst(Inst::Add(Register::ZeroReg, imm.into())))
-    }
-
-    fn into_reg (&mut self, rhs: RegisterOrImmediate) -> Register {
-        match rhs {
-            RegisterOrImmediate::Register(r) => r,
-            RegisterOrImmediate::Immediate(v) => self.materialize_constant(v)
-        }
-    }
-
-    fn destruct (&mut self, rhs: RegisterOrImmediate, lhs: RegisterOrImmediate) -> (Register, RegisterOrImmediate) {
-        use RegisterOrImmediate as RoI;
-
-        match (lhs.clone(), rhs.clone()) {
-            (RoI::Register(l), RoI::Register(_)) => (l, rhs),
-            (RoI::Register(l), RoI::Immediate(_)) => (l, rhs),
-            (RoI::Immediate(_), RoI::Register(r)) => (r, lhs),
-            (RoI::Immediate(_), RoI::Immediate(_)) => {
-                // TODO: write a subroutine that materializes immediates 
-                (self.into_reg(lhs), self.into_reg(rhs).into())
-                
-            }, 
-        }
-    } 
-
     /* Can't do a recursive backwards dependency traversal from the return node becasue then we might accidentally do D.C.E and 
     also skip over instructions that modify global state. Also hard to deal w/ conditionals */
     /* Lower instructions in linear order */
-    fn lower_hir_inst(&mut self, instruction_h: InstructionHandle) -> InstHandle {
-        let instruction = self.cfg.get_inst(&instruction_h);
+    fn lower_hir_inst(& mut self, instruction_h: &InstructionHandle, cfg: & CFG<'ctx>, subroutine: &mut Subroutine) -> InstHandle {
+        let instruction = cfg.get_inst(&instruction_h);
         match instruction {
             Instruction::Load(loc) => {
                 let inst = match *loc  {
@@ -170,7 +136,7 @@ impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
                         let f = |op: InstHandle| {
                             Inst::Ldr(op.into(), Register::FramePointer, -1 * (offset as i32))
                         };
-                        let inst = self.subroutine.inst_arena.insert_with_key(f);
+                        let inst = subroutine.inst_arena.insert_with_key(f);
                         inst
                         
                     }
@@ -178,7 +144,7 @@ impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
                         let f = |op: InstHandle| {
                             Inst::Ldr(op.into(), Register::FramePointer, 4 + (offset as i32))
                         };
-                        let inst = self.subroutine.inst_arena.insert_with_key(f);
+                        let inst = subroutine.inst_arena.insert_with_key(f);
                         inst
                     }
                     // Wtf is the difference between label and data idiot. 
@@ -190,12 +156,12 @@ impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
                     }
                     MemoryLocation::Cast(_) => todo!(),
                 };
-                self.hreg_to_lreg.insert(instruction_h, inst);
+                self.hreg_to_lreg.insert(*instruction_h, inst);
                 inst
             },
             Instruction::Store(op, loc) => {
                 let op = self.lower_hir_op(*op);
-                let op = self.into_reg(op);
+                let op = subroutine.into_reg(op);
 
                 let inst = match *loc  {
                     MemoryLocation::Stack(size, offset) => {
@@ -225,8 +191,8 @@ impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
                     MemoryLocation::Cast(_) => todo!(),
                 };
 
-                let inst = self.add_inst(inst);
-                self.hreg_to_lreg.insert(instruction_h, inst);
+                let inst = subroutine.add_inst(inst);
+                self.hreg_to_lreg.insert(*instruction_h, inst);
                 inst
             }
             Instruction::BinaryOp(op, lhs, rhs) => {
@@ -239,33 +205,28 @@ impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
                 /* For commutative ops, confirm that at least one of the operands is a register, if not make it one */
                 // TODO: Make sure this is like inlined or something idk? 
 
-
-
-                
-
-
                 /* Should we do optimizations here or save for later. They would work so well here! */
                 let res = match op {
                     hir::BinaryOpType::Add => {
-                        let (reg, imm) = self.destruct(lhs, rhs);
+                        let (reg, imm) = subroutine.destruct(lhs, rhs);
                         let inst = Inst::Add(reg, imm);
-                        let inst= self.add_inst(inst);
+                        let inst= subroutine.add_inst(inst);
                         inst
                     }
                     hir::BinaryOpType::Sub => {
-                        let lhs = self.into_reg(lhs);
-                        let lhs = self.add_inst(Inst::Add(lhs.into(), (-1).into())); // This is awesome that this works, howeve rcan't we just spam .into() automatically? 
+                        let lhs = subroutine.into_reg(lhs);
+                        let lhs = subroutine.add_inst(Inst::Add(lhs.into(), (-1).into())); // This is awesome that this works, howeve rcan't we just spam .into() automatically? 
                         // ^^^ Why do i have to call into. I hope it doesn't actually compile to anything
-                        let lhs: Register = self.add_inst(Inst::Not(lhs.into())).into();
+                        let lhs: Register = subroutine.add_inst(Inst::Not(lhs.into())).into();
                         // Just kidding, this is a mess! wtf.
-                        let res = self.add_inst(Inst::Add(lhs.into(), rhs));
+                        let res = subroutine.add_inst(Inst::Add(lhs.into(), rhs));
                         res
                         
                         // Seems to only call into() automcatcally on subroutine parameters / returns, wonder if we can get it to do it for struct / enum constructors.
                     }
                     hir::BinaryOpType::And => {
-                        let lhs = self.into_reg(lhs);
-                        let inst = self.add_inst(Inst::And(lhs, rhs));
+                        let lhs = subroutine.into_reg(lhs);
+                        let inst = subroutine.add_inst(Inst::And(lhs, rhs));
                         inst
                     }
 
@@ -283,7 +244,7 @@ impl <'ctx, 'ir> LIRGenFunc<'ctx, 'ir> {
                     hir::BinaryOpType::LeftShift => todo!(),
                     hir::BinaryOpType::RightShift => todo!(),
                 };
-                self.hreg_to_lreg.insert(instruction_h, res);
+                self.hreg_to_lreg.insert(*instruction_h, res);
                 res
 
             }
@@ -351,9 +312,9 @@ impl <'ctx> LIRGen<'ctx> {
             
             let cfg =  cfg.as_ref().borrow().to_owned();
             // TODO: Reuse LIRGENFunc instead of allocating and freeing new ones, is this something a compiler can do? 
-            let fgen = LIRGenFunc::new(cfg, &mut self.lir, &mut self.hir , self.context);
+            let fgen = LIRGenFunc::new(self.context);
            
-            let subroutine =  fgen.lower_subroutine();
+            let subroutine =  fgen.run(cfg);
             self.lir.subroutines.push(subroutine);
         }
 

@@ -88,7 +88,7 @@ pub struct StackFrame {
 pub struct Subroutine {
     pub(crate) name: InternedString,
 
-    // Don't have a block ordering yet. 
+    // TODO: We don't have a block ordering yet. 
     // pub(crate) blocks: Vec<Block>,
 
     pub block_arena: SlotMap<BlockHandle, Block>,
@@ -119,6 +119,36 @@ impl Subroutine {
                 } 
         }
     }
+
+    pub fn add_inst(&mut self, inst: Inst) -> InstHandle {
+        self.inst_arena.insert(inst)
+    }
+
+    pub fn materialize_constant(&mut self, imm: Immediate) -> Register {
+        Register::VRegister(self.add_inst(Inst::Add(Register::ZeroReg, imm.into())))
+    }
+
+    pub fn into_reg (&mut self, rhs: RegisterOrImmediate) -> Register {
+        match rhs {
+            RegisterOrImmediate::Register(r) => r,
+            RegisterOrImmediate::Immediate(v) => self.materialize_constant(v)
+        }
+    }
+
+    pub fn destruct (&mut self, rhs: RegisterOrImmediate, lhs: RegisterOrImmediate) -> (Register, RegisterOrImmediate) {
+        use RegisterOrImmediate as RoI;
+
+        match (lhs.clone(), rhs.clone()) {
+            (RoI::Register(l), RoI::Register(_)) => (l, rhs),
+            (RoI::Register(l), RoI::Immediate(_)) => (l, rhs),
+            (RoI::Immediate(_), RoI::Register(r)) => (r, lhs),
+            (RoI::Immediate(_), RoI::Immediate(_)) => {
+                // TODO: write a subroutine that materializes immediates 
+                (self.into_reg(lhs), self.into_reg(rhs).into())
+                
+            }, 
+        }
+    } 
 }
 
 /* ========== Block ============ */
@@ -266,5 +296,5 @@ pub enum Inst {
     
     Trap(TrapKind), // Trap vector.
     Halt, // We should really sub-enum trap above ^^^
-    Subroutine(SubroutineKind),
+    SillySubroutine(SubroutineKind), /* FIX NAMES !s */
 }
