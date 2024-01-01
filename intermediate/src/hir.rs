@@ -73,7 +73,8 @@ pub struct CFG<'ctx> {
     return_ty: InternedType, 
 
     /* Stack Frame */
-    pub(crate) stack_frame: VarInfo,
+    pub(crate) stack_frame: VarInfo, 
+    /* TODO: This may only be needed for the generation stages, might be able to move to  */
 
     // Globals??
     // Ref to 'globals' hashmap?
@@ -201,12 +202,14 @@ impl <'ctx> CFG<'ctx> {
 
 }
 
+/* ================ Printable CFG ================ */
 pub struct CFGPrintable<'ctx> {
     pub cfg: CFG<'ctx>,
     // This is disgusting:
     pub names: RefCell<SecondaryMap<InstructionHandle, i32>>,
     pub counter: RefCell<i32>,
 }
+
 
 impl <'ctx> CFGPrintable<'ctx> {
     pub fn new(cfg: CFG<'ctx>) -> CFGPrintable<'ctx> {

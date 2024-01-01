@@ -5,7 +5,7 @@ but everything should be target specific at this point (so its codegen'd, not re
 * Honestly lets just print a verified version of this. */
 
 /* Here are some goals about this IR:
- * No information about functions, that doesn't exist, we only have labels, instructions, and data.
+ * No information about subroutines, that doesn't exist, we only have labels, instructions, and data.
  * Starts in SSA and then register allocation to non-ssa? Probably somethjing like that makes sense.
  * 
  * Some optimizations / passes we want to do here
@@ -50,10 +50,9 @@ slotmap::new_key_type! { pub struct BlockHandle; }
 
 #[derive(Debug, Clone)]
 pub struct LIR<'ctx> {
-    // This is confusing, maybe we should do something about it. What even happens after register allocation?
 
     // Pre register allocation
-    pub functions: Vec<Function>,
+    pub subroutines: Vec<Subroutine>,
 
     // Data section, 
     pub data: Vec<Data>,
@@ -68,7 +67,7 @@ impl <'ctx> LIR <'ctx> {
 
     pub fn new(context: &'ctx Context<'ctx>) -> LIR<'ctx> {
         LIR {
-            functions: Vec::new(), 
+            subroutines: Vec::new(), 
             data: Vec::new(),
             context,
         }
@@ -76,16 +75,17 @@ impl <'ctx> LIR <'ctx> {
 }
 
 /* ======== Stack Frame ============ */
-
+#[derive(Debug, Clone)]
 pub struct StackFrame {
     parameters_size: usize,
     locals_size: usize,
 }
 
-/* Eventually we could have different function types that support different calling converntions,
-*  This represents a function with the classic C calling convention. */
+/* ======== Subroutine ============ */
+/* Eventually we could have different subroutine types that support different calling converntions,
+*  This represents a subroutine with the classic C calling convention. */
 #[derive(Debug, Clone)]
-pub struct Function {
+pub struct Subroutine {
     pub(crate) name: InternedString,
 
     // Don't have a block ordering yet. 
@@ -94,14 +94,35 @@ pub struct Function {
     pub block_arena: SlotMap<BlockHandle, Block>,
     pub inst_arena: SlotMap<InstHandle, Inst>,
 
-    pub(crate) setup: BlockHandle,
-    pub(crate) teardown: BlockHandle,
+    pub(crate) setup: Option<BlockHandle>,
+    pub(crate) teardown: Option<BlockHandle>,
     pub(crate) optimize: bool,
 
     /* TODO: Add a field represnting the stack frame maybe? Mapping certain ops to memory locations. */
+    stack_frame: StackFrame,
+    
 }
 
-/* Not a basic block, just a block, this is lower level in the same way as explained above*/
+impl Subroutine {
+    pub fn new(name: InternedString) -> Subroutine {
+        Subroutine {
+            name, 
+            block_arena: SlotMap::with_key(),
+            inst_arena: SlotMap::with_key(),
+            setup: None,
+            teardown: None,
+            optimize: true,
+            stack_frame: 
+                StackFrame {
+                    parameters_size: 0,
+                    locals_size: 0,
+                } 
+        }
+    }
+}
+
+/* ========== Block ============ */
+/* Not a basic block, just a block lol. LIR analogue of HIR's BasicBlock */
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub(crate) label: Label,
@@ -113,7 +134,6 @@ pub struct Block {
 pub enum Label {
     Label(InternedString)
 }
-
 
 /* TODO: Potentially support inlining of these. */
 #[derive(Debug, Clone, PartialEq)]
@@ -134,15 +154,18 @@ pub type Immediate = i32;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Register {
     // Zero Register is a virtual Register aswell, 
-    VRegister(InstHandle), /* Virtual Register, infinite  */
-    //ZeroRegister,
-
-    HRegister(usize), /* Hardware Register, in between 0 and 3 probably */
-    StackPointer,
-    FramePointer,
+    /* Virtual Register, infinite  */
+    VRegister(InstHandle), 
     ZeroReg,
+
+    /* Hardware Register, in between 0 and 3 probably */
+    HRegister(u8), 
+    StackPointer, /* StackPointer should just be an alias for HRegister(8) */
+    FramePointer,
+    
 } 
 
+/* Some handy conversion functions. */
 impl From<InstHandle> for Register {
     fn from(value: InstHandle) -> Self {
         Register::VRegister(value)
@@ -156,7 +179,7 @@ impl TryFrom<RegisterOrImmediate> for Register {
     fn try_from(value: RegisterOrImmediate) -> Result<Self, Self::Error> {
         match value {
             RegisterOrImmediate::Register(value) =>  Ok(value),
-            RegisterOrImmediate::Immediate(value) => Err("Bad!"),
+            RegisterOrImmediate::Immediate(_) => Err("Bad!"),
         }
     }
 }
@@ -171,6 +194,7 @@ impl TryFrom<RegisterOrImmediate> for Immediate {
         }
     }
 }
+
 /* At some point we need to decide if this will actually be access using global register ptr (R4), or with just names and hope they are close enough. */
 #[derive(Debug, Clone, PartialEq)]
 pub enum Data {
@@ -200,9 +224,9 @@ impl From<Immediate> for RegisterOrImmediate {
 }
 
 
+/* ============= Inst ============== */
 /* We use Inst in LIR, instead of Instruction (in HIR), because Inst is smaller and thus closer to the assembly. */
 /* How to model dataflow? Do we even need to at this stage? (Yes, we want that). */
-
 
 /* TODO: I want to eliminate the possibility that lc3 instructions that don't output into a register are used as ops,
 *  I'm not sure how to do that yet, probably just by messing with how these types are set up */
@@ -212,12 +236,15 @@ pub enum Inst {
     /* Unclear if it makes sense to distinguish between register vs immediates here,  */
     Add(Register, RegisterOrImmediate),
     And(Register, RegisterOrImmediate),
-    //AddReg(Register, Register),
-    //AddImm(Register, Immediate),
-    //AndReg(Register, Register),
-    //AndImm(Register, Immediate),
+
+        //AddReg(Register, Register),
+        //AddImm(Register, Immediate),
+        //AndReg(Register, Register),
+        //AndImm(Register, Immediate),
+    
     Not(Register),
 
+    /* Memory Instructions */
     St(Register, Label),
     Sti(Register, Label), // Indirect Store (use for casts)
     Str(Register, Register, Immediate), // Source, Base, Offset
@@ -226,7 +253,7 @@ pub enum Inst {
     Ldr(Register, Register, Immediate),
     Lea(Register, Label),
 
-    /* More control-flow esque instructions */
+    /* Control-flow instructions */
     Br(bool, bool, bool, Label),
     BrImm(bool, bool, bool, Immediate),
     Jmp(Register),
