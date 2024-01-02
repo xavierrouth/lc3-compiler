@@ -93,12 +93,17 @@ pub struct StackFrame {
 pub struct Subroutine {
     pub(crate) name: InternedString,
 
-    // TODO: We don't have a block ordering yet. 
     pub block_order: Vec<BlockHandle>,
 
     pub block_arena: SlotMap<BlockHandle, Block>,
+
+    // TODO: Should this be owned by the Blocks themselves, 
+    // that makes it really difficult to merge blocks, or move instructions in between blocks, 
+    // so I think that is a bad idea in general.
+    
     pub inst_arena: SlotMap<InstHandle, Inst>,
 
+    pub(crate) body: BlockHandle,
     pub(crate) setup: Option<BlockHandle>,
     pub(crate) teardown: Option<BlockHandle>,
     pub(crate) optimize: bool,
@@ -108,14 +113,25 @@ pub struct Subroutine {
     
 }
 
+/* Try a pattern like this? */
+Subroutine<Mutable> 
 
 impl Subroutine {
     pub fn new(name: InternedString) -> Subroutine {
+        let mut block_arena = SlotMap::with_key();
+ 
+        let body = Block {
+            label: Label::Unnamed,
+            instruction_order: Vec::new(),
+            optimize: true,
+        };
+
+        let body = block_arena.insert(body);
         Subroutine {
             name, 
             block_order: Vec::new(),
             block_arena: SlotMap::with_key(),
-            inst_arena: SlotMap::with_key(),
+            inst_arena: SlotMap::with_key(), 
             setup: None,
             teardown: None,
             optimize: true,
@@ -123,18 +139,26 @@ impl Subroutine {
                 StackFrame {
                     parameters_size: 0,
                     locals_size: 0,
-                } 
+                },
+            body, 
         }
     }
-
-    /* This doesn't put itself in the order wchih is hillarious, what are you doing?  */
-    pub fn add_inst(&mut self, inst: Inst, block_h: &BlockHandle,) -> InstHandle {
-        self.
-        self.inst_arena.insert(inst)
+    
+    /*
+    /** These can be all part of a 'Block Builder', that has a ref to Subroutine, for convenience. */
+    pub fn add_inst(&mut self, block_h: &BlockHandle, inst: Inst, ) -> InstHandle {
+        let block = self.block_arena.get_mut(*block_h).unwrap();
+        self.add_inst_fast(block, inst)
     }
 
-    pub fn materialize_constant(&mut self, imm: Immediate) -> Register {
-        Register::VRegister(self.add_inst(Inst::Add(Register::ZeroReg, imm.into())))
+    pub fn add_inst_fast(&mut self, block: &mut Block, inst: Inst,) -> InstHandle {
+        let h = self.inst_arena.insert(inst);
+        block.instruction_order.push(h);
+        h
+    }
+
+    pub fn materialize_constant(&mut self, block_h: &BlockHandle, imm: Immediate) -> Register {
+        Register::VRegister(self.add_inst(block_h, Inst::Add(Register::ZeroReg, imm.into())))
     }
 
     pub fn into_reg (&mut self, rhs: RegisterOrImmediate) -> Register {
@@ -157,7 +181,26 @@ impl Subroutine {
                 
             }, 
         }
-    } 
+    }  */
+}
+
+/* What if we need to partially borrow.... Let's see what happens.,  */
+pub struct SubroutineBuilder<'a> {
+    subroutine: &'a mut Subroutine,
+    curr_block: Option<(BlockHandle, Block)>, 
+}
+
+impl <'a> SubroutineBuilder<'a> {
+    pub fn new(subroutine: &'a mut Subroutine) -> Self {
+        SubroutineBuilder {
+            subroutine,
+            curr_block: None,
+        }
+    }
+
+    pub fn add_inst(&mut self, inst: Inst) -> InstHandle {
+        self.subroutine.add_inst_fast(c, inst)
+    }
 }
 
 /* ============= Subroutine Printable ============ */
@@ -317,7 +360,8 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Label {
-    Label(InternedString)
+    Label(InternedString),
+    Unnamed,
 }
 
 /* TODO: Potentially support inlining of these. */
