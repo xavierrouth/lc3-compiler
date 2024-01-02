@@ -24,8 +24,8 @@ impl <'ctx> Context <'ctx>{
     }
 
     /* Fixme this should just be an &str */
-    pub fn resolve_string(& self, string: InternedString) -> &'ctx str  {
-        self.strings.borrow().resolve(string).unwrap()
+    pub fn resolve_string(& self, string: InternedString) -> String {
+        self.strings.borrow().resolve(string).unwrap().to_string()
     }
 
     pub fn get_string(&self, string: &str) -> InternedString {

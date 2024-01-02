@@ -42,8 +42,10 @@ but everything should be target specific at this point (so its codegen'd, not re
  /* At this point give up on trying to do analysis on anything that is in memory (overflowed things). That is a completely reasonable decision right? 
   * */
 
+use std::{fmt::Display, cell::RefCell};
+
 use lex_parse::{context::{InternedString, Context}, ast::WithContext};
-use slotmap::SlotMap;
+use slotmap::{SlotMap, SecondaryMap};
 
 slotmap::new_key_type! { pub struct InstHandle; }
 slotmap::new_key_type! { pub struct BlockHandle; }
@@ -62,7 +64,10 @@ pub struct LIR<'ctx> {
 
 impl <'ctx> LIR <'ctx> {
     pub fn print(&self) -> () {
-        println!("hi bingle :)")
+        for sub in &self.subroutines {
+            let printable = SubroutinePrintable::new(sub.clone(), self.context);
+            printable.print();
+        }
     }
 
     pub fn new(context: &'ctx Context<'ctx>) -> LIR<'ctx> {
@@ -122,7 +127,9 @@ impl Subroutine {
         }
     }
 
-    pub fn add_inst(&mut self, inst: Inst) -> InstHandle {
+    /* This doesn't put itself in the order wchih is hillarious, what are you doing?  */
+    pub fn add_inst(&mut self, inst: Inst, block_h: &BlockHandle,) -> InstHandle {
+        self.
         self.inst_arena.insert(inst)
     }
 
@@ -157,6 +164,9 @@ impl Subroutine {
 pub struct SubroutinePrintable<'ctx> {
     pub context: &'ctx Context<'ctx>,
     pub subroutine: Subroutine,
+
+    pub names: RefCell<SecondaryMap<InstHandle, i32>>,
+    pub counter: RefCell<i32>,
 }
 
 impl <'ctx> SubroutinePrintable<'ctx> {
@@ -164,6 +174,8 @@ impl <'ctx> SubroutinePrintable<'ctx> {
         SubroutinePrintable {
             subroutine,
             context,
+            names: RefCell::new(SecondaryMap::new()), 
+            counter: RefCell::new(0)
         }
     } 
 
@@ -171,6 +183,7 @@ impl <'ctx> SubroutinePrintable<'ctx> {
         let name = self.context.resolve_string(self.subroutine.name);
         println!("subroutine: {}", name);
 
+        /* Why isn't this doing anything?  */
         for block_handle in &self.subroutine.block_order {
             self.print_block(block_handle);
         }
@@ -182,12 +195,115 @@ impl <'ctx> SubroutinePrintable<'ctx> {
 
         let name = self.context.resolve_string(label);
 
-        println!("{block }", name);
+        println!("block {}:", name);
 
         for inst in &block.instruction_order {
+            self.print_inst(inst);
+        } 
+        println!("");  
+    }
 
+    fn print_inst(&self, inst_handle: &InstHandle) -> () {
+        let inst = self.subroutine.inst_arena.get(*inst_handle).unwrap();
+        
+        let out: String = match inst {
+            Inst::Add(r1, r2) => {
+                format!("{} = add {}, {}", 
+                    self.name_inst(inst_handle), 
+                    self.get_reg_name(r1), 
+                    self.get_reg_immediate_name(r2)
+                )
+            },
+            Inst::And(r1, r2) => {
+                format!("{} = and {}, {}", 
+                    self.name_inst(inst_handle), 
+                    self.get_reg_name(r1), 
+                    self.get_reg_immediate_name(r2)
+                )
+            },
+            Inst::Not(r1) => {
+                format!("{} = not {}", 
+                    self.name_inst(inst_handle), 
+                    self.get_reg_name(r1), 
+                )
+            }
+            Inst::St(_, _) => todo!(),
+            Inst::Sti(_, _) => todo!(),
+            Inst::Str(_, _, _) => todo!(),
+            Inst::Ld(_, _) => todo!(),
+            Inst::Ldi(_, _) => todo!(),
+            Inst::Ldr(_, _, _) => todo!(),
+            Inst::Lea(_, _) => todo!(),
+
+            Inst::Br(cc, label) => {
+                format!("bingle")
+                /*
+                format!("{} = not {}", 
+                    self.name_inst(inst_handle), 
+                    self.get_reg_name(r1), 
+                )  */
+            },
+
+            Inst::BrImm(_, _) => todo!(),
+            Inst::Jmp(_) => todo!(),
+            Inst::Jsr(_) => todo!(),
+            Inst::Jsrr(_) => todo!(),
+            Inst::Ret => todo!(),
+            Inst::Rti => todo!(),
+            Inst::Trap(_) => todo!(),
+            Inst::Halt => todo!(),
+            Inst::SillySubroutine(_) => todo!(),
+        };
+        println!("   {out}");
+    }
+
+    fn get_reg_immediate_name(&self, roi: &RegisterOrImmediate) -> String {
+        match roi {
+            RegisterOrImmediate::Register(r) => self.get_reg_name(r),
+            RegisterOrImmediate::Immediate(imm) => format!("{imm}"),
         }
     }
+
+    /* Assigns a name to an InstHandle */
+    fn name_inst(& self, inst: &InstHandle) -> String {
+        let mut names = self.names.borrow_mut();
+        let name = names.get(*inst);
+        match name {
+            Some(&val) => {
+                format!("v%{val}")
+            }
+            None => {
+                // Mutable RefMut ????? 
+                let mut ctr = self.counter.borrow_mut();
+                let tmp = ctr.clone();
+                names.insert(*inst, *ctr);
+                *ctr += 1;
+                format!("v%{tmp}")
+            }
+        }
+    }
+
+    fn get_reg_name(&self, register: &Register) -> String {
+        // Does this involve a copy?
+        match register {
+            Register::VRegister(inst) => {
+                /* Name the instruction if needed. */
+                /* after moving this to outer loop, then: 
+                INSTRUCTION SHOULD BE NAMED ALREADY, ELSE REORDERING CAUSE A PROBLEM. */
+
+                // TODO, we can name these earlier to remove a conciditoonal check. 
+                self.name_inst(inst)
+            }
+            Register::ZeroReg => format!("%R(zero)"),
+            Register::HRegister(val) => {
+                format!("%R{val}")
+            },
+            Register::StackPointer => format!("%SP"),
+            Register::FramePointer => format!("%FP"),
+        }
+       
+    }
+
 }
 
 /* ========== Block ============ */
@@ -233,6 +349,7 @@ pub enum Register {
     FramePointer,
     
 } 
+
 
 /* Some handy conversion functions. */
 impl From<InstHandle> for Register {
@@ -293,6 +410,16 @@ impl From<Immediate> for RegisterOrImmediate {
 }
 
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum BrCondCode {
+    NZP,
+    NZ,
+    ZP,
+    NP,
+    N,
+    P,
+    Z,
+}
 /* ============= Inst ============== */
 /* We use Inst in LIR, instead of Instruction (in HIR), because Inst is smaller and thus closer to the assembly. */
 /* How to model dataflow? Do we even need to at this stage? (Yes, we want that). */
@@ -323,8 +450,8 @@ pub enum Inst {
     Lea(Register, Label),
 
     /* Control-flow instructions */
-    Br(bool, bool, bool, Label),
-    BrImm(bool, bool, bool, Immediate),
+    Br(BrCondCode, Label),
+    BrImm(BrCondCode, Immediate),
     Jmp(Register),
     Jsr(Label),
     Jsrr(Register),

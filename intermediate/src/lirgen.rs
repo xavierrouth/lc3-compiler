@@ -75,11 +75,13 @@ impl <'ctx> LIRGenFunc<'ctx> {
         for basic_block_h in &order {
 
             let name = cfg.basic_block_arena.get(*basic_block_h).unwrap().name;
-            let block_h = subroutine.block_arena.insert(
-                Block { label: Label::Label(name), instructions: Vec::new(), optimize: true }
+            let block_h = subroutine.block_arena.insert (
+                Block { label: Label::Label(name), instruction_order: Vec::new(), optimize: true }
             );
 
             self.bb_to_block.insert(*basic_block_h, block_h);
+            /* This is so wrong,  */
+            subroutine.block_order.push(block_h);
         }
 
         /* Populate LIR blocks */
@@ -102,9 +104,12 @@ impl <'ctx> LIRGenFunc<'ctx> {
         
         for instruction_h in &cfg.resolve_bb(*basic_block_h).instructions {
             // Need to automatically add the ordering to the instructions vec. Oops!
-            let inst = self.lower_hir_inst(instruction_h, cfg, subroutine);
+            let inst = self.lower_hir_inst(instruction_h, cfg, subroutine, block_h);
             instructions.push(inst);
         }
+
+        let a = subroutine.block_arena.get_mut(*block_h).unwrap();
+        a.instruction_order = instructions;
 
     }
 
@@ -119,7 +124,7 @@ impl <'ctx> LIRGenFunc<'ctx> {
     /* Can't do a recursive backwards dependency traversal from the return node becasue then we might accidentally do D.C.E and 
     also skip over instructions that modify global state. Also hard to deal w/ conditionals */
     /* Lower instructions in linear order */
-    fn lower_hir_inst(& mut self, instruction_h: &InstructionHandle, cfg: & CFG<'ctx>, subroutine: &mut Subroutine) -> InstHandle {
+    fn lower_hir_inst(& mut self, instruction_h: &InstructionHandle, cfg: & CFG<'ctx>, subroutine: &mut Subroutine, block_h: &BlockHandle) -> InstHandle {
         let instruction = cfg.get_inst(&instruction_h);
         match instruction {
             Instruction::Load(loc) => {
@@ -325,7 +330,7 @@ impl <'ctx> LIRGen<'ctx> {
     fn emit_prologue(&mut self, cfg: &CFG<'ctx>) -> Block {
         Block { // TODO: This needs to have .prologue appended.
             label: Label::Label(cfg.name),
-            instructions: Vec::new(),
+            instruction_order: Vec::new(),
             optimize: false,
         }
     }
@@ -334,7 +339,7 @@ impl <'ctx> LIRGen<'ctx> {
     fn emit_epilogue(&mut self, cfg: &CFG<'ctx>) -> Block {
         Block { // TODO: This needs to have .epologue appended.
             label: Label::Label(cfg.name),
-            instructions: Vec::new(),
+            instruction_order: Vec::new(),
             optimize: false,
         }
     }

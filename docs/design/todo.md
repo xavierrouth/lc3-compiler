@@ -17,13 +17,35 @@ Even though we aren't ever constructing these nodes ourselves, if the AST is wro
 it will add a lot more boilerplate to our code that interacts with the AST. 
 
 Related Case Study:
-- When walking the ast to generate HIR, mutually recursive with special return types and such. 
+- When walking the AST to generate HIR, mutually recursive with special return types and such. 
+- I forget what i was going to say here.
+
 
 #### Complicated Memory Locations
+I forget what I was going to say here.
 
 
 
-#### Error Handling
+
+
+#### String Allocations
+Quite difficult to manage string allocations when printing intermediate representations. Not really worried about this because you shouldn't really be printing these things that often? 
+
+#### AST -> HIR
+There is some friction when writing code to lower a recursive data structure into a non recursive one. Y
+
+#### HIR -> LIR 
+There is some friction when writing code to lower a 
+
+
+This is a complete failure, I hate it, it is so messy. 
+#### HIR Invariants
+
+#### LIR Invariants
+I want rust's type system & borrow checker to help enforce these, but the use of an arena makes that very difficult, but thats okay! Maybe it's meant to be hard, rust isn't magic after all.
+
+
+#### Error Handling / Source Location Info
 Some discussion:
 I was previously under the impression that error reporting should be added after the main functionality of the compiler was done, as to not interfere with the implementation or speed of the . This implementation would involve a few auxiliary maps from tokens or ast nodes to debug information. I was assuming that a compiler's primary job was to compile correct programs.
 
