@@ -114,7 +114,6 @@ pub struct Subroutine {
 }
 
 /* Try a pattern like this? */
-Subroutine<Mutable> 
 
 impl Subroutine {
     pub fn new(name: InternedString) -> Subroutine {
@@ -144,13 +143,16 @@ impl Subroutine {
         }
     }
     
-    /*
+    
     /** These can be all part of a 'Block Builder', that has a ref to Subroutine, for convenience. */
     pub fn add_inst(&mut self, block_h: &BlockHandle, inst: Inst, ) -> InstHandle {
         let block = self.block_arena.get_mut(*block_h).unwrap();
-        self.add_inst_fast(block, inst)
+        let h = self.inst_arena.insert(inst);
+        block.instruction_order.push(h);
+        h
     }
 
+    /* 
     pub fn add_inst_fast(&mut self, block: &mut Block, inst: Inst,) -> InstHandle {
         let h = self.inst_arena.insert(inst);
         block.instruction_order.push(h);
@@ -186,20 +188,56 @@ impl Subroutine {
 
 /* What if we need to partially borrow.... Let's see what happens.,  */
 pub struct SubroutineBuilder<'a> {
-    subroutine: &'a mut Subroutine,
-    curr_block: Option<(BlockHandle, Block)>, 
+    inst_arena: &'a mut SlotMap<InstHandle, Inst>,
+    handle: BlockHandle,
+    block: &'a mut Block, 
 }
 
 impl <'a> SubroutineBuilder<'a> {
-    pub fn new(subroutine: &'a mut Subroutine) -> Self {
+    pub fn new(inst_arena: &'a mut SlotMap<InstHandle, Inst>, handle: &BlockHandle, block: &'a mut Block) -> Self {
         SubroutineBuilder {
-            subroutine,
-            curr_block: None,
+            inst_arena,
+            handle: *handle, 
+            block: block,
         }
     }
 
     pub fn add_inst(&mut self, inst: Inst) -> InstHandle {
-        self.subroutine.add_inst_fast(c, inst)
+        let h = self.inst_arena.insert(inst);
+        self.block.instruction_order.push(h);
+        h
+    }
+
+    pub fn add_inst_with_key(&mut self, f: impl Fn(InstHandle) -> Inst) -> InstHandle {
+        let h = self.inst_arena.insert_with_key(f);
+        self.block.instruction_order.push(h);
+        h
+    }
+
+    pub fn materialize_constant(&mut self, imm: Immediate) -> Register {
+        Register::VRegister(self.add_inst(Inst::Add(Register::ZeroReg, imm.into())))
+    }
+
+    pub fn into_reg (&mut self, rhs: RegisterOrImmediate) -> Register {
+        match rhs {
+            RegisterOrImmediate::Register(r) => r,
+            RegisterOrImmediate::Immediate(v) => self.materialize_constant(v)
+        }
+    }
+
+    pub fn destruct (&mut self, rhs: RegisterOrImmediate, lhs: RegisterOrImmediate) -> (Register, RegisterOrImmediate) {
+        use RegisterOrImmediate as RoI;
+
+        match (lhs.clone(), rhs.clone()) {
+            (RoI::Register(l), RoI::Register(_)) => (l, rhs),
+            (RoI::Register(l), RoI::Immediate(_)) => (l, rhs),
+            (RoI::Immediate(_), RoI::Register(r)) => (r, lhs),
+            (RoI::Immediate(_), RoI::Immediate(_)) => {
+                // TODO: write a subroutine that materializes immediates 
+                (self.into_reg(lhs), self.into_reg(rhs).into())
+                
+            }, 
+        }
     }
 }
 
@@ -234,9 +272,10 @@ impl <'ctx> SubroutinePrintable<'ctx> {
 
     fn print_block(&self, block_handle: &BlockHandle) -> () {
         let block = self.subroutine.block_arena.get(*block_handle).expect("uh oh");
-        let Label::Label(label) = block.label;
-
-        let name = self.context.resolve_string(label);
+        let name = match block.label {
+            Label::Label(l) => self.context.resolve_string(l),
+            Label::Unnamed => "unnamed".to_owned(),
+        };
 
         println!("block {}:", name);
 

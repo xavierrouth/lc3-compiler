@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc, collections::HashMap, borrow::Borrow};
 
-use crate::{TypedArena, hir::{HIR, CFG, BasicBlock, BasicBlockHandle, Instruction, Operand, InstructionHandle, self, MemoryLocation}, lir::{LIR, Block, Inst, Register, RegisterOrImmediate, Immediate, InstHandle, Subroutine, Label, BlockHandle}};
+use crate::{TypedArena, hir::{HIR, CFG, BasicBlock, BasicBlockHandle, Instruction, Operand, InstructionHandle, self, MemoryLocation}, lir::{LIR, Block, Inst, Register, RegisterOrImmediate, Immediate, InstHandle, Subroutine, Label, BlockHandle, SubroutineBuilder}};
 
 use analysis::{symtab::{SymbolTable, ScopeHandle, VarDecl}, typedast::{TypedAST, TypedASTNode, TypedASTNodeHandle}};
 use lex_parse::{ast::{ASTNodeHandle, AST, ASTNode, self}, error::ErrorHandler, context::Context};
@@ -100,11 +100,16 @@ impl <'ctx> LIRGenFunc<'ctx> {
         let mut instructions = Vec::new();
 
         let (basic_block_h, block_h) = block_info;
+
+        let block = subroutine.block_arena.get_mut(*block_h).unwrap();
+
         /* Loop through instructions and lower each instruction */
-        
+        let mut builder = SubroutineBuilder::new(&mut subroutine.inst_arena, block_h, block);
+
         for instruction_h in &cfg.resolve_bb(*basic_block_h).instructions {
             // Need to automatically add the ordering to the instructions vec. Oops!
-            let inst = self.lower_hir_inst(instruction_h, cfg, subroutine, block_h);
+            
+            let inst = self.lower_hir_inst(instruction_h, cfg, &mut builder);
             instructions.push(inst);
         }
 
@@ -124,7 +129,7 @@ impl <'ctx> LIRGenFunc<'ctx> {
     /* Can't do a recursive backwards dependency traversal from the return node becasue then we might accidentally do D.C.E and 
     also skip over instructions that modify global state. Also hard to deal w/ conditionals */
     /* Lower instructions in linear order */
-    fn lower_hir_inst(& mut self, instruction_h: &InstructionHandle, cfg: & CFG<'ctx>, subroutine: &mut Subroutine, block_h: &BlockHandle) -> InstHandle {
+    fn lower_hir_inst(& mut self, instruction_h: &InstructionHandle, cfg: & CFG<'ctx>,  builder: &mut SubroutineBuilder<'_>) -> InstHandle {
         let instruction = cfg.get_inst(&instruction_h);
         match instruction {
             Instruction::Load(loc) => {
@@ -141,7 +146,7 @@ impl <'ctx> LIRGenFunc<'ctx> {
                         let f = |op: InstHandle| {
                             Inst::Ldr(op.into(), Register::FramePointer, -1 * (offset as i32))
                         };
-                        let inst = subroutine.inst_arena.insert_with_key(f);
+                        let inst = builder.add_inst_with_key(f);
                         inst
                         
                     }
@@ -149,7 +154,7 @@ impl <'ctx> LIRGenFunc<'ctx> {
                         let f = |op: InstHandle| {
                             Inst::Ldr(op.into(), Register::FramePointer, 4 + (offset as i32))
                         };
-                        let inst = subroutine.inst_arena.insert_with_key(f);
+                        let inst = builder.add_inst_with_key(f);
                         inst
                     }
                     // Wtf is the difference between label and data idiot. 
@@ -166,7 +171,7 @@ impl <'ctx> LIRGenFunc<'ctx> {
             },
             Instruction::Store(op, loc) => {
                 let op = self.lower_hir_op(*op);
-                let op = subroutine.into_reg(op);
+                let op = builder.into_reg(op);
 
                 let inst = match *loc  {
                     MemoryLocation::Stack(size, offset) => {
@@ -196,7 +201,7 @@ impl <'ctx> LIRGenFunc<'ctx> {
                     MemoryLocation::Cast(_) => todo!(),
                 };
 
-                let inst = subroutine.add_inst(inst);
+                let inst = builder.add_inst(inst);
                 self.hreg_to_lreg.insert(*instruction_h, inst);
                 inst
             }
@@ -213,25 +218,25 @@ impl <'ctx> LIRGenFunc<'ctx> {
                 /* Should we do optimizations here or save for later. They would work so well here! */
                 let res = match op {
                     hir::BinaryOpType::Add => {
-                        let (reg, imm) = subroutine.destruct(lhs, rhs);
+                        let (reg, imm) = builder.destruct(lhs, rhs);
                         let inst = Inst::Add(reg, imm);
-                        let inst= subroutine.add_inst(inst);
+                        let inst= builder.add_inst(inst);
                         inst
                     }
                     hir::BinaryOpType::Sub => {
-                        let lhs = subroutine.into_reg(lhs);
-                        let lhs = subroutine.add_inst(Inst::Add(lhs.into(), (-1).into())); // This is awesome that this works, howeve rcan't we just spam .into() automatically? 
+                        let lhs = builder.into_reg(lhs);
+                        let lhs = builder.add_inst(Inst::Add(lhs.into(), (-1).into())); // This is awesome that this works, howeve rcan't we just spam .into() automatically? 
                         // ^^^ Why do i have to call into. I hope it doesn't actually compile to anything
-                        let lhs: Register = subroutine.add_inst(Inst::Not(lhs.into())).into();
+                        let lhs: Register = builder.add_inst(Inst::Not(lhs.into())).into();
                         // Just kidding, this is a mess! wtf.
-                        let res = subroutine.add_inst(Inst::Add(lhs.into(), rhs));
+                        let res = builder.add_inst(Inst::Add(lhs.into(), rhs));
                         res
                         
                         // Seems to only call into() automcatcally on subroutine parameters / returns, wonder if we can get it to do it for struct / enum constructors.
                     }
                     hir::BinaryOpType::And => {
-                        let lhs = subroutine.into_reg(lhs);
-                        let inst = subroutine.add_inst(Inst::And(lhs, rhs));
+                        let lhs = builder.into_reg(lhs);
+                        let inst = builder.add_inst(Inst::And(lhs, rhs));
                         inst
                     }
 
