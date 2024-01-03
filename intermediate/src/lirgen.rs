@@ -97,8 +97,6 @@ impl <'ctx> LIRGenFunc<'ctx> {
 
     /* Iterates over the istructions in the block and lowers them to lc3-ir grouped into a Block? */
     fn lower_bb(&mut self, block_info: (&BasicBlockHandle, &BlockHandle), cfg: &mut CFG<'ctx>, subroutine: &mut Subroutine) -> () {
-        let mut instructions = Vec::new();
-
         let (basic_block_h, block_h) = block_info;
 
         let block = subroutine.block_arena.get_mut(*block_h).unwrap();
@@ -107,14 +105,8 @@ impl <'ctx> LIRGenFunc<'ctx> {
         let mut builder = SubroutineBuilder::new(&mut subroutine.inst_arena, block_h, block);
 
         for instruction_h in &cfg.resolve_bb(*basic_block_h).instructions {
-            // Need to automatically add the ordering to the instructions vec. Oops!
-            
-            let inst = self.lower_hir_inst(instruction_h, cfg, &mut builder);
-            instructions.push(inst);
+            self.lower_hir_inst(instruction_h, cfg, &mut builder);
         }
-
-        let a = subroutine.block_arena.get_mut(*block_h).unwrap();
-        a.instruction_order = instructions;
 
     }
 
@@ -256,7 +248,6 @@ impl <'ctx> LIRGenFunc<'ctx> {
                 };
                 self.hreg_to_lreg.insert(*instruction_h, res);
                 res
-
             }
             Instruction::UnaryOp(_, _) => todo!(),
             Instruction::CondBr(_, _, _) => todo!(),
@@ -271,7 +262,6 @@ impl <'ctx> LIRGenFunc<'ctx> {
             Instruction::Call(_) => todo!(),
             Instruction::Lea(_) => todo!(),
         }
-        
     }
 
     /* 

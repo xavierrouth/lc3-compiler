@@ -352,7 +352,7 @@ impl <'ctx> SubroutinePrintable<'ctx> {
         let name = names.get(*inst);
         match name {
             Some(&val) => {
-                format!("v%{val}")
+                format!("%v{val}")
             }
             None => {
                 // Mutable RefMut ????? 
@@ -360,7 +360,7 @@ impl <'ctx> SubroutinePrintable<'ctx> {
                 let tmp = ctr.clone();
                 names.insert(*inst, *ctr);
                 *ctr += 1;
-                format!("v%{tmp}")
+                format!("%v{tmp}")
             }
         }
     }
