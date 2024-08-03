@@ -93,19 +93,19 @@ impl<'a> Codegen<'a> {
                 emit!(self, Instruction(LC3Inst::Not(right, right), Some("evaluate '=='".to_string())));
                 emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
                 emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
-                emit!(self, Instruction(LC3Inst::BrImm(false, true, false, Imm::Int(2)), None)); // if zero,
+                emit!(self, Instruction(LC3Inst::BrImm(false, true, false, Imm::Int(2)), None)); // if zero, jump over assignment to 0
                 emit!(self, Instruction(LC3Inst::AndImm(ret, ret, Imm::Int(0)), Some("evaluate to '0' or 'false'".to_string())));
-                emit!(self, Instruction(LC3Inst::BrImm(true, true, true, Imm::Int(3)), None));
+                emit!(self, Instruction(LC3Inst::BrImm(true, true, true, Imm::Int(1)), None));
                 emit!(self, Instruction(LC3Inst::AddImm(ret, ret, Imm::Int(1)), None));
             }
             BinaryOpType::NotEqual => {
                 emit!(self, Instruction(LC3Inst::Not(right, right), Some("evaluate '!='".to_string())));
                 emit!(self, Instruction(LC3Inst::AddImm(right, right, Imm::Int(1)), None));
                 emit!(self, Instruction(LC3Inst::AddReg(ret, left, right), None));
-                emit!(self, Instruction(LC3Inst::BrImm(true, false, true, Imm::Int(2)), None)); // if not zero,
-                emit!(self, Instruction(LC3Inst::AndImm(ret, ret, Imm::Int(0)), Some("evaluate to '0' or 'false'".to_string())));
-                emit!(self, Instruction(LC3Inst::BrImm(true, true, true, Imm::Int(3)), None));
-                emit!(self, Instruction(LC3Inst::AddImm(ret, ret, Imm::Int(1)), None));
+                emit!(self, Instruction(LC3Inst::BrImm(false, true, false, Imm::Int(2)), None)); // if not zero,
+                emit!(self, Instruction(LC3Inst::AndImm(ret, ret, Imm::Int(1)), Some("evaluate to '1' or 'true'".to_string())));
+                emit!(self, Instruction(LC3Inst::BrImm(true, true, true, Imm::Int(1)), None));
+                emit!(self, Instruction(LC3Inst::AddImm(ret, ret, Imm::Int(0)), None));
             }
             _ => {
                 println!("error: This feature is currently unimplemeneted.");
