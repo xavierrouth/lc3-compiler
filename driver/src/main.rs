@@ -1,7 +1,8 @@
 #![deny(rust_2018_idioms)]
 use std::{path::PathBuf, fs::File, io::Read};
-use analysis::{analysis::Analyzer, typecheck::{Typecheck, TypedASTPrint}};
+use analysis::{symres::SymbolResolutionPass, typecheck::{TypecheckPass}, typedast::{TypedASTPrint, TypedVistior}};
 use clap::{Parser};
+use intermediate::{hirgen::{self, HIRGen}, hir::HIR, lirgen::LIRGen};
 //use codegen::asmprinter::AsmPrinter;
 use lex_parse::{lexer, parser, ast::{ASTPrint, Vistior}, error::ErrorHandler, context::Context};
 
@@ -60,36 +61,66 @@ fn main() {
         Err(error) => {error_handler.print_parser_error(error); return},
     };
 
-    let root =&ast.root.unwrap();
+    let root = &ast.root.unwrap();
     if cli.verbose {
+        println!("====================== AST =====================");
         let mut printer: ASTPrint<'_> = ASTPrint::new(false, &ast, &context);
-        printer.traverse(root);
+        printer.traverse(*root);
+        println!("");
     }
 
-    let mut analyzer: Analyzer<'_> = Analyzer::new(&ast, &context, &error_handler);
+    let mut analyzer: SymbolResolutionPass<'_> = SymbolResolutionPass::new(&ast, &context, &error_handler);
     
     // Check for analysis errors
-    analyzer.traverse(root);
+    analyzer.traverse(*root);
 
     if *error_handler.fatal.borrow() {
         return;
     }
 
     if cli.verbose {
-        analyzer.print_symbol_table();
+        // analyzer.print_symbol_table();
     } 
 
-    let mut typecheck: Typecheck<'_> = Typecheck::new(&mut analyzer.symbol_table, &ast, &context, &error_handler);
+    // Should use some sort of AnalyzerResult interface instead of stealing members. 
+    let mut symbtab = analyzer.symbol_table;
+    let scopes = analyzer.scopes;
 
-    typecheck.traverse(root);
+    let typecheck: TypecheckPass<'_> = TypecheckPass::new(ast, &mut symbtab, &context, scopes, &error_handler);
+
+    let ast = typecheck.run();
+
 
     if cli.verbose {
-        let mut typed_printer = TypedASTPrint::new(false, &ast, &context, typecheck.types, typecheck.lr, typecheck.casts.clone());
-        typed_printer.traverse(root);
+        println!("====================== Typed AST =====================");
+        let mut typed_printer = TypedASTPrint::new(false, &ast, &context);
+        typed_printer.traverse(ast.root.expect("invalid root"));
+        println!("");
     };
 
-    let casts = typecheck.casts;
+    let hirgen = HIRGen::new(ast, symbtab, &context, &error_handler);
 
+    let hir: HIR<'_> = hirgen.run();
+
+    if cli.verbose {
+        println!("====================== HIR =====================");
+        hir.print();
+        println!("")
+    }
+
+    let lirgen = LIRGen::new(hir, &context);
+
+    let lir = lirgen.run();
+
+    if cli.verbose {
+        println!("====================== LIR =====================");
+        lir.print();
+        println!("")
+    }
+    
+
+
+    /* 
     let mut printer = codegen::asmprinter::AsmPrinter::new();
     let mut codegen = codegen::codegen::Codegen::new(&ast, &mut printer, &context, analyzer.symbol_table, casts);
 
@@ -99,7 +130,7 @@ fn main() {
         Some(file) => file,
         None => PathBuf::from(r"/out.asm")
     };
-    printer.print_to_file(outfile);
+    printer.print_to_file(outfile); */
 
     //println!("two: {:?}", cli.verbose);  */
 

@@ -198,7 +198,7 @@ impl<'a, 'ctx> Lexer<'a, 'ctx> {
                     "do" => Ok(TokenKind::Do),
                     "const" => Ok(TokenKind::Const),
                     "struct" => Ok(TokenKind::Struct),
-                    "NULL" => Ok(TokenKind::Null),
+                    "NULL" => Ok(TokenKind::Null), // Language extension
                     // TODO:
                     _  => Ok(TokenKind::Identifier(string))
                 }

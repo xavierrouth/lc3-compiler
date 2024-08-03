@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+lex-parse = { path = "../lex-parse" }
+analysis = { path = "../analysis" }
 colored = "2"
 slotmap = "1.0"
 string-interner = "0.14"
